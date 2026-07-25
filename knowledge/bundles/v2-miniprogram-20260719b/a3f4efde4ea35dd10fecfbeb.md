@@ -1,0 +1,55 @@
+---
+asset_id: pvg.v2.a3f4efde4ea35dd10fecfbeb
+version: v2-37e168916a7e
+tenant_id: pvg
+title: T1航站楼出发送客区哪里有卫生间？
+section: excel_knowledge
+reviewer: v2-legacy-human-review
+publisher: v3-staging-migration
+published_at: '2026-07-18T20:00:00+08:00'
+source_uri: viking://resources/pvg/excel/risk_control/卫生间分布/T1航站楼/risk_control-0855-T1航站楼出发送客区哪里有卫生间.md
+status: published
+knowledge_type: service_information
+valid_from: '2026-07-19T00:00:00+08:00'
+valid_until: '2026-10-17T00:00:00+08:00'
+channel_scope:
+- miniprogram
+terminal_scope:
+- T1
+revoked_at: ''
+---
+---
+title: T1航站楼出发送客区哪里有卫生间？
+source_owner: PVG passenger service
+source_type: excel_knowledge
+source_id: risk_control-0855
+version: 1.0
+updated_at: 2026-04-30
+effective_from: 2026-04-30
+scope: demo_only
+confidentiality: internal
+review_status: approved_for_demo
+---
+
+# T1航站楼出发送客区哪里有卫生间？
+
+## 分类
+
+- 一级分类：卫生间分布
+- 二级分类：T1航站楼
+
+## 标准答案
+
+位于T1航站楼出发送客区的卫生间具体分布在：C岛岛尾（设有无障碍卫生间、家庭卫生间）；F岛岛尾（设有家庭卫生间）；K岛岛尾（设有无障碍卫生间、母婴室、家庭卫生间）；三楼3号门；三楼7号门；三楼12号门。
+
+## 意图标签
+
+- 主意图：restroom_query
+- 次意图：mother_baby_room_query
+
+## 风险与来源
+
+- 风险等级：Low
+- 来源：Excel 原始资料
+- 联系电话：未提供
+- 备注：以机场官方最新通知或现场指引为准。

@@ -81,7 +81,7 @@ together = ["torch>=2.8.0", "together>=1.5.26", "transformers>=4.53.0"]
 
 cerebras = ["cerebras-cloud-sdk>=1.25.0", "torch>=2.8.0", "transformers>=4.53.0"]
 
-deepseek = ["torch>=2.8.0", "transformers>=4.53.0"]
+deepseek = ["torch>=2.8.0", "transformers>=4.53.0,<5"]  # <5: Jina embedder remote code imports transformers.onnx, removed in 5.x
 
 gemini = ["google-genai>=1.36.0", "google-api-core>=2.24.2", "torch>=2.8.0"]
 
@@ -107,6 +107,10 @@ mistral = ["mistralai>=1.0.0"]
 snowflake = ["snowflake-connector-python>=3.12.0"]
 
 zhipu = ["zhipuai>=2.0.0"]
+rag = [
+    "jieba>=0.42.1",
+    "rank-bm25>=0.2.2",
+]
 
 [dependency-groups]
 dev = [

@@ -1,0 +1,17 @@
+.git
+.venv
+venv
+__pycache__
+*.pyc
+parlant-data
+knowledge
+logs
+docs
+evaluation
+tests
+examples
+deploy
+hf-cache
+*.tar.gz
+.DS_Store
+pytest_stochastics.json

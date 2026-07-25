@@ -1,0 +1,61 @@
+---
+asset_id: pvg.v2.a583eb5b5fdcdc9fda8a4693
+version: v2-884f10a72533
+tenant_id: pvg
+title: 老城隍庙食品店在哪里，营业时间是什么时候？
+section: excel_knowledge
+reviewer: v2-legacy-human-review
+publisher: v3-staging-migration
+published_at: '2026-07-18T20:00:00+08:00'
+source_uri: viking://resources/pvg/excel/risk_control/商业餐饮/零售/risk_control-0552-老城隍庙食品店在哪里-营业时间是什么时候.md
+status: published
+knowledge_type: service_information
+valid_from: '2026-07-19T00:00:00+08:00'
+valid_until: '2026-10-17T00:00:00+08:00'
+channel_scope:
+- miniprogram
+terminal_scope:
+- ALL
+revoked_at: ''
+---
+---
+title: 老城隍庙食品店在哪里，营业时间是什么时候？
+source_owner: PVG passenger service
+source_type: excel_knowledge
+source_id: risk_control-0552
+version: 1.0
+updated_at: 2026-04-30
+effective_from: 2026-04-30
+scope: demo_only
+confidentiality: internal
+review_status: approved_for_demo
+---
+
+# 老城隍庙食品店在哪里，营业时间是什么时候？
+
+## 分类
+
+- 一级分类：商业餐饮
+- 二级分类：零售
+
+## 标准答案
+
+楼域：T1
+区域：T1公众出发层
+商业类型：零售
+店铺位置：T1公众出发层10号门附近
+营业时间：07:00-22：00
+主营范围：食品、烟酒
+外送服务：有
+
+## 意图标签
+
+- 主意图：duty_free_query
+- 次意图：未标注
+
+## 风险与来源
+
+- 风险等级：Low
+- 来源：Excel 原始资料
+- 联系电话：已在 Demo 知识库中隐藏，需接入官方系统后按权限展示。
+- 备注：以机场官方最新通知或现场指引为准。

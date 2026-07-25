@@ -17,6 +17,8 @@ cache/
 logs
 runtime-data
 parlant-data
+docs/real-mcp-call-guide-*.md
+scripts/pvg_proxy.env
 /dist/
 scripts/sdks/
 scripts/fern/openapi
