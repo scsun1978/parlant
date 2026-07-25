@@ -1,0 +1,12 @@
+# 管理后台 BFF 镜像：基于 pvg-poc（含 fastapi/uvicorn/httpx），补 pymongo，打包 admin/
+# 构建（仓库根为上下文）：docker compose -f deploy/docker-compose.yml -f deploy/docker-compose.dev.yml build admin-bff
+FROM pvg-poc:latest
+
+RUN pip install "pymongo>=4.11.1"
+
+WORKDIR /app
+COPY admin ./admin
+
+ENV PYTHONUNBUFFERED=1
+EXPOSE 9000
+CMD ["python", "-m", "uvicorn", "admin.app.main:app", "--host", "0.0.0.0", "--port", "9000"]

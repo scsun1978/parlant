@@ -1,0 +1,59 @@
+# PVG 智能客服 PoC 容器编排（dev03 / ai-server 用）
+# 数据目录约定（bind mount，相对本文件的上级仓库根）：
+#   ../parlant-data      → /data/parlant-data（引擎 home，含已种子化配置）
+#   ../knowledge/index   → /data/knowledge/index（知识检索索引）
+#   ../hf-cache          → /root/.cache/huggingface（Jina 模型，离线加载）
+services:
+  pvg-proxy:
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile
+    image: pvg-poc:latest
+    container_name: pvg-proxy
+    command: python scripts/pvg_mcp_proxy.py
+    env_file:
+      - ../scripts/pvg_proxy.env
+    environment:
+      PVG_KNOWLEDGE_INDEX: /data/knowledge/index
+      PVG_PROXY_HOST: 0.0.0.0
+      HF_HUB_OFFLINE: "1"
+      TRANSFORMERS_OFFLINE: "1"
+    ports:
+      - "8900:8900"
+    mem_limit: 6g
+    restart: unless-stopped
+    networks: [pvg]
+
+  parlant-server:
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile
+    image: pvg-poc:latest
+    container_name: parlant-server
+    command: python -m parlant.bin.server run --deepseek
+    env_file:
+      - ../scripts/pvg_proxy.env
+    environment:
+      PARLANT_HOME: /data/parlant-data
+      HF_HUB_OFFLINE: "1"
+      TRANSFORMERS_OFFLINE: "1"
+    volumes:
+      - ../parlant-data:/data/parlant-data
+      - ../hf-cache:/root/.cache/huggingface
+    ports:
+      - "8800:8800"
+    mem_limit: 6g
+    restart: unless-stopped
+    depends_on:
+      - pvg-proxy
+    networks: [pvg]
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request,sys;sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8800/agents',timeout=5).status==200 else 1)"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 60s
+
+networks:
+  pvg:
+    driver: bridge

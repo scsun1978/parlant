@@ -1,0 +1,129 @@
+# 单节点开发环境编排（面向管理后台开发，对齐生产架构组件形态）
+# 用法：docker compose -f deploy/docker-compose.yml -f deploy/docker-compose.dev.yml up -d
+# 相对基础版的变化：
+#   · 新增 pvg-rag 检索服务（生产 RAG 微服务形态，含 /stages 分阶段召回、/reload 热加载）
+#   · 新增 mongo（后台治理数据库/未来 Parlant 持久化）、qdrant（向量库）
+#   · proxy 去模型纯转发（PVG_RAG_URL 指向 pvg-rag），内存重分配适配 15GB 单机
+services:
+  pvg-proxy:
+    mem_limit: 2g
+    environment:
+      PVG_RAG_URL: http://pvg-rag:8901
+    depends_on:
+      - pvg-rag
+
+  parlant-server:
+    # 内存限额沿用基础版 6g：启动期 torch+Jina 模型+save_pretrained 峰值超过 4g 会被 cgroup OOM
+    environment:
+      PARLANT_HOME: /data/parlant-data
+
+  pvg-rag:
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile
+    image: pvg-poc:latest
+    container_name: pvg-rag
+    command: python scripts/pvg_rag_service.py
+    environment:
+      PVG_KNOWLEDGE_INDEX: /data/knowledge/index
+      PVG_RAG_HOST: 0.0.0.0
+      PVG_RAG_PORT: "8901"
+      # /reindex 子进程构建索引的 bundle 来源（只读挂载）；查询日志落盘持久化
+      PVG_BUNDLES_DIR: /data/knowledge/bundles/v2-miniprogram-20260719b
+      PVG_QUERY_LOG: /data/knowledge/index/query-log.jsonl
+      HF_HUB_OFFLINE: "1"
+      TRANSFORMERS_OFFLINE: "1"
+    volumes:
+      - ../knowledge/index:/data/knowledge/index
+      - ../knowledge/bundles:/data/knowledge/bundles:ro
+      - ../hf-cache:/root/.cache/huggingface
+    ports:
+      - "8901:8901"
+    mem_limit: 6g
+    restart: unless-stopped
+    networks: [pvg]
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request,sys;sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8901/health',timeout=5).status==200 else 1)"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 60s
+
+  mongo:
+    image: mongo:7
+    container_name: pvg-mongo
+    ports:
+      - "27017:27017"
+    volumes:
+      - mongo-data:/data/db
+    mem_limit: 1536m
+    restart: unless-stopped
+    networks: [pvg]
+
+  qdrant:
+    image: qdrant/qdrant:latest
+    container_name: pvg-qdrant
+    ports:
+      - "6333:6333"
+    volumes:
+      - qdrant-data:/qdrant/storage
+    mem_limit: 1536m
+    restart: unless-stopped
+    networks: [pvg]
+
+  # 管理后台 BFF（FastAPI 实现，Java BFF 为生产目标形态——设计 v2.1 §6）
+  admin-bff:
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile.admin
+    image: pvg-admin-bff:latest
+    container_name: pvg-admin-bff
+    environment:
+      MONGO_URL: mongodb://mongo:27017
+      MONGO_DB: pvg_admin
+      PARLANT_BASE_URL: http://parlant-server:8800
+      RAG_URL: http://pvg-rag:8901
+      PROD_AGENT_ID: xyVHBNLLPg
+      ADMIN_CORS_ORIGINS: "*"
+      # 知识补录 bundle 写入目录（rw 挂载；pvg-rag 同目录 ro 挂载供 /reindex 重建）
+      BUNDLES_DIR: /data/knowledge/bundles/v2-miniprogram-20260719b
+      # 仅开发环境的五角色账号；生产必须经 secret 注入 ADMIN_USERS_JSON
+      ADMIN_USERS_JSON: '[{"username":"admin","password":"admin123","role":"admin"},{"username":"yunying","password":"pvg2026","role":"operator"},{"username":"shenhe","password":"pvg2026","role":"reviewer"},{"username":"shenji","password":"pvg2026","role":"auditor"},{"username":"banzhang","password":"pvg2026","role":"supervisor"}]'
+    ports:
+      - "9000:9000"
+    volumes:
+      - ../knowledge/bundles:/data/knowledge/bundles:rw
+    mem_limit: 1g
+    restart: unless-stopped
+    depends_on:
+      - parlant-server
+      - pvg-rag
+      - mongo
+    networks: [pvg]
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request,sys;sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:9000/health',timeout=5).status==200 else 1)"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 30s
+
+  # 低代码 CRUD 页面平台（设计 v2.1 Q7：Appsmith 社区版自托管）
+  appsmith:
+    image: appsmith/appsmith-ce:release
+    container_name: pvg-appsmith
+    ports:
+      - "8902:80"
+    volumes:
+      - appsmith-data:/appsmith-stacks
+    mem_limit: 2g
+    restart: unless-stopped
+    networks: [pvg]
+
+volumes:
+  mongo-data:
+  qdrant-data:
+  appsmith-data:
+
+networks:
+  pvg:
+    driver: bridge
