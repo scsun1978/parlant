@@ -1,0 +1,197 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>召回测试台 · PVG 智能客服运营后台</title>
+  <link rel="stylesheet" href="styles.css" />
+  <style>
+    .controls { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+    .controls .text-input { flex: 1; min-width: 260px; }
+    .stages { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 12px; }
+    .stage-col h3 { font-size: 13px; margin: 0 0 8px; color: #45506b; }
+    .doc-row { border: 1px solid #e3e7ef; border-radius: 8px; padding: 8px 10px; margin-bottom: 8px; cursor: pointer; font-size: 13px; }
+    .doc-row .head { display: flex; gap: 8px; align-items: baseline; }
+    .doc-row .rank { color: #6b7690; font-size: 12px; }
+    .doc-row .score { margin-left: auto; font-family: ui-monospace, monospace; font-size: 12px; color: #2563eb; }
+    .doc-row .title { font-weight: 500; }
+    .doc-row .meta { color: #6b7690; font-size: 12px; margin-top: 3px; }
+    .doc-row .content { display: none; margin-top: 6px; padding: 8px; background: #f6f8fc; border-radius: 6px; font-size: 12px; white-space: pre-wrap; }
+    .doc-row.open .content { display: block; }
+    .doc-row.hit-all { border-color: #059669; background: #ecfdf5; }
+    .doc-row.low-score .score { color: #b45309; }
+    .doc-row.low-score { border-style: dashed; }
+    .empty-stage { padding: 14px; text-align: center; color: #b45309; background: #fffbeb; border: 1px dashed #d97706; border-radius: 8px; font-size: 13px; }
+    .history { display: flex; flex-wrap: wrap; gap: 6px; }
+    .history .chip { font-size: 12px; background: #eceff5; border-radius: 10px; padding: 3px 10px; cursor: pointer; }
+    .history .chip:hover { background: #dbe4f3; }
+    #reload-result { font-size: 12px; color: #059669; }
+  </style>
+</head>
+<body>
+  <header class="topbar">
+    <span class="brand">召回测试台</span>
+    <nav class="topnav">
+        <a href="/app/workbench.html">质检工作台</a>
+      <a href="/app/">会话中心</a>
+      <a href="/app/knowledge.html">知识库</a>
+      <a href="/app/rag.html" class="active">召回测试台</a>
+      <a href="/app/sandbox.html">试聊沙盒</a>
+      <a href="/app/canned-preview.html">话术预览</a>
+    </nav>
+    <span id="who" class="who"></span>
+  </header>
+
+  <div class="page">
+    <div class="panel">
+      <div class="controls">
+        <input id="query" class="text-input" placeholder="输入测试问题，如：T2 到 S2 怎么走？" />
+        <select id="count" class="select-input">
+          <option value="5">top 5</option>
+          <option value="10">top 10</option>
+          <option value="20">top 20</option>
+        </select>
+        <button id="btn-run" class="btn primary">召回测试</button>
+        <button id="btn-reload" class="btn hidden">热加载索引</button>
+        <span id="reload-result"></span>
+      </div>
+      <div id="params" class="muted" style="margin-top:8px"></div>
+    </div>
+
+    <div class="panel">
+      <h2>最近查询（本地保存 20 条）</h2>
+      <div id="history" class="history"><span class="muted">暂无</span></div>
+    </div>
+
+    <div class="stages">
+      <div class="panel stage-col"><h3>BM25</h3><div id="col-bm25"></div></div>
+      <div class="panel stage-col"><h3>向量</h3><div id="col-vector"></div></div>
+      <div class="panel stage-col"><h3>RRF 融合</h3><div id="col-rrf"></div></div>
+    </div>
+  </div>
+
+  <script>
+    (function () {
+      "use strict";
+      var token = localStorage.getItem("pvg_admin_token") || "";
+      var role = localStorage.getItem("pvg_admin_role") || "";
+      if (!token) { location.href = "/app/"; return; }
+      document.getElementById("who").textContent =
+        (localStorage.getItem("pvg_admin_username") || "") + "（" + role + "）";
+      if (role === "admin") document.getElementById("btn-reload").classList.remove("hidden");
+
+      function $(id) { return document.getElementById(id); }
+      function esc(s) {
+        return String(s == null ? "" : s).replace(/[&<>"']/g, function (c) {
+          return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c];
+        });
+      }
+      function api(path, body) {
+        return fetch(path, {
+          method: "POST",
+          headers: { "Authorization": "Bearer " + token, "Content-Type": "application/json" },
+          body: JSON.stringify(body || {}),
+        }).then(function (resp) {
+          if (resp.status === 401) { location.href = "/app/"; throw new Error("登录失效"); }
+          return resp.json().then(function (j) {
+            if (!resp.ok) throw new Error(j.detail || ("HTTP " + resp.status));
+            return j;
+          });
+        });
+      }
+
+      // ---- 历史查询（localStorage 最近 20 条） ----
+      var HKEY = "pvg_rag_history";
+      function loadHistory() {
+        try { return JSON.parse(localStorage.getItem(HKEY) || "[]"); } catch (e) { return []; }
+      }
+      function pushHistory(q) {
+        var h = loadHistory().filter(function (x) { return x !== q; });
+        h.unshift(q);
+        localStorage.setItem(HKEY, JSON.stringify(h.slice(0, 20)));
+        renderHistory();
+      }
+      function renderHistory() {
+        var h = loadHistory();
+        var box = $("history");
+        if (!h.length) { box.innerHTML = '<span class="muted">暂无</span>'; return; }
+        box.innerHTML = "";
+        h.forEach(function (q) {
+          var chip = document.createElement("span");
+          chip.className = "chip";
+          chip.textContent = q;
+          chip.addEventListener("click", function () { $("query").value = q; run(); });
+          box.appendChild(chip);
+        });
+      }
+
+      // ---- 渲染三阶段结果 ----
+      function renderCol(el, docs, hitAll) {
+        el.innerHTML = "";
+        if (!docs || !docs.length) {
+          el.innerHTML = '<div class="empty-stage">该阶段无结果</div>';
+          return;
+        }
+        var top = docs[0].score;
+        docs.forEach(function (d) {
+          var row = document.createElement("div");
+          var low = top > 0 && d.score < top * 0.5;
+          row.className = "doc-row" +
+            (hitAll[d.title] ? " hit-all" : "") + (low ? " low-score" : "");
+          row.innerHTML =
+            '<div class="head"><span class="rank">#' + d.rank + "</span>" +
+            '<span class="title">' + esc(d.title) + "</span>" +
+            '<span class="score">' + esc(d.score) + "</span></div>" +
+            '<div class="meta">' + esc(d.knowledge_type || "") +
+            (d.valid_until ? " · 有效期至 " + esc(d.valid_until) : "") +
+            (low ? ' · <span class="warn-text">低分（低于首名 50%）</span>' : "") +
+            (hitAll[d.title] ? ' · <span style="color:#059669">三阶段均命中</span>' : "") +
+            "</div>" +
+            '<div class="content">' + esc(d.content || "") + "</div>";
+          row.addEventListener("click", function () { row.classList.toggle("open"); });
+          el.appendChild(row);
+        });
+      }
+
+      function run() {
+        var q = $("query").value.trim();
+        if (!q) return;
+        var count = parseInt($("count").value, 10);
+        $("params").textContent = "查询中…";
+        api("/api/rag/stages", { query: q, count: count }).then(function (r) {
+          pushHistory(q);
+          var p = r.params || {};
+          $("params").textContent =
+            "query=" + r.query + " · bm25_top=" + p.bm25_top + " · vec_top=" + p.vec_top + " · rrf_k=" + p.rrf_k;
+          // 三阶段都命中的文档标题 → 高亮
+          var count3 = {};
+          ["bm25", "vector", "rrf"].forEach(function (k) {
+            (r[k] || []).forEach(function (d) { count3[d.title] = (count3[d.title] || 0) + 1; });
+          });
+          var hitAll = {};
+          Object.keys(count3).forEach(function (t) { if (count3[t] === 3) hitAll[t] = true; });
+          renderCol($("col-bm25"), r.bm25, hitAll);
+          renderCol($("col-vector"), r.vector, hitAll);
+          renderCol($("col-rrf"), r.rrf, hitAll);
+        }).catch(function (err) {
+          $("params").innerHTML = '<span class="error-text">' + esc(err.message) + "</span>";
+        });
+      }
+
+      $("btn-run").addEventListener("click", run);
+      $("query").addEventListener("keydown", function (e) { if (e.key === "Enter") run(); });
+
+      $("btn-reload").addEventListener("click", function () {
+        $("reload-result").textContent = "热加载中…";
+        api("/api/rag/reload").then(function (r) {
+          $("reload-result").textContent = "热加载完成，docs=" + (r.docs != null ? r.docs : JSON.stringify(r));
+        }).catch(function (err) {
+          $("reload-result").innerHTML = '<span class="error-text">' + esc(err.message) + "</span>";
+        });
+      });
+
+      renderHistory();
+    })();
+  </script>
+</body>
+</html>

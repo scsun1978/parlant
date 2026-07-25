@@ -1,0 +1,118 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>话术预览 · PVG 智能客服运营后台</title>
+  <link rel="stylesheet" href="styles.css" />
+  <style>
+    .preview-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+    .slot-hints { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+    .slot-hints .chip { font-size: 12px; background: #eceff5; border-radius: 10px; padding: 3px 10px; cursor: pointer; font-family: ui-monospace, monospace; }
+    .slot-hints .chip:hover { background: #dbe4f3; }
+    #rendered { background: #f6f8fc; border-radius: 8px; padding: 14px; min-height: 120px; white-space: pre-wrap; font-size: 14px; }
+    #render-error { margin-top: 8px; }
+  </style>
+</head>
+<body>
+  <header class="topbar">
+    <span class="brand">话术预览</span>
+    <nav class="topnav">
+        <a href="/app/workbench.html">质检工作台</a>
+      <a href="/app/">会话中心</a>
+      <a href="/app/knowledge.html">知识库</a>
+        <a href="/app/rag.html">召回测试台</a>
+      <a href="/app/sandbox.html">试聊沙盒</a>
+      <a href="/app/canned-preview.html" class="active">话术预览</a>
+    </nav>
+    <span id="who" class="who"></span>
+  </header>
+
+  <div class="page">
+    <div class="preview-grid">
+      <div class="panel">
+        <h2>模板（jinja2，StrictUndefined 校验）</h2>
+        <textarea id="tpl" class="textarea-input" rows="10"
+          placeholder="您好，航班 {{flight_no}} 当前状态为 {{flight_status}}。"></textarea>
+        <div class="muted" style="margin-top:6px">常见槽位：</div>
+        <div class="slot-hints">
+          <span class="chip" data-slot="{{knowledge_answer}}">{{knowledge_answer}}</span>
+          <span class="chip" data-slot="{{knowledge_source}}">{{knowledge_source}}</span>
+          <span class="chip" data-slot="{{flight_info}}">{{flight_info}}</span>
+        </div>
+      </div>
+      <div class="panel">
+        <h2>字段样例（JSON）</h2>
+        <textarea id="sample" class="textarea-input" rows="6"
+          placeholder='{"flight_no": "MU5117", "flight_status": "延误"}'></textarea>
+        <h2 style="margin-top:14px">渲染预览</h2>
+        <div id="rendered"><span class="muted">输入模板与样例后实时渲染。</span></div>
+        <div id="render-error" class="error-text"></div>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    (function () {
+      "use strict";
+      var token = localStorage.getItem("pvg_admin_token") || "";
+      var role = localStorage.getItem("pvg_admin_role") || "";
+      if (!token) { location.href = "/app/"; return; }
+      document.getElementById("who").textContent =
+        (localStorage.getItem("pvg_admin_username") || "") + "（" + role + "）";
+
+      function $(id) { return document.getElementById(id); }
+      function esc(s) {
+        return String(s == null ? "" : s).replace(/[&<>"']/g, function (c) {
+          return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c];
+        });
+      }
+
+      var timer = null;
+      function schedule() { clearTimeout(timer); timer = setTimeout(render, 400); }
+
+      function render() {
+        var value = $("tpl").value;
+        if (!value.trim()) {
+          $("rendered").innerHTML = '<span class="muted">输入模板与样例后实时渲染。</span>';
+          $("render-error").textContent = "";
+          return;
+        }
+        var sample = {};
+        try {
+          sample = $("sample").value.trim() ? JSON.parse($("sample").value) : {};
+        } catch (e) {
+          $("render-error").textContent = "样例 JSON 解析失败：" + e.message;
+          return;
+        }
+        fetch("/api/canned/preview", {
+          method: "POST",
+          headers: { "Authorization": "Bearer " + token, "Content-Type": "application/json" },
+          body: JSON.stringify({ value: value, sample_fields: sample }),
+        }).then(function (resp) {
+          if (resp.status === 401) { location.href = "/app/"; return null; }
+          return resp.json();
+        }).then(function (r) {
+          if (!r) return;
+          if (r.error) {
+            $("rendered").textContent = "";
+            $("render-error").textContent = r.error;
+          } else {
+            $("rendered").textContent = r.rendered;
+            $("render-error").textContent = "";
+          }
+        });
+      }
+
+      $("tpl").addEventListener("input", schedule);
+      $("sample").addEventListener("input", schedule);
+      document.querySelectorAll(".slot-hints .chip").forEach(function (chip) {
+        chip.addEventListener("click", function () {
+          $("tpl").value += chip.getAttribute("data-slot");
+          schedule();
+        });
+      });
+    })();
+  </script>
+</body>
+</html>

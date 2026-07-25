@@ -1,0 +1,194 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>试聊沙盒 · PVG 智能客服运营后台</title>
+  <link rel="stylesheet" href="styles.css" />
+  <style>
+    .sandbox-grid { display: grid; grid-template-columns: 380px 1fr; gap: 14px; }
+    .draft-label { font-size: 13px; color: #45506b; margin: 10px 0 4px; }
+    #chat-box { height: 56vh; overflow-y: auto; background: #f6f8fc; border-radius: 8px; padding: 12px; }
+    #chat-input-row { display: flex; gap: 8px; margin-top: 10px; }
+    #chat-input-row .text-input { flex: 1; }
+    .msg { max-width: 78%; margin-bottom: 10px; padding: 9px 13px; border-radius: 12px; font-size: 14px; white-space: pre-wrap; word-break: break-word; }
+    .msg.user { background: #2563eb; color: #fff; margin-left: auto; }
+    .msg.ai { background: #fff; border: 1px solid #e3e7ef; margin-right: auto; }
+    .msg .tag { font-size: 11px; color: #9aa3b8; display: block; margin-bottom: 2px; }
+    .tool-block { margin: 4px 0 10px; font-size: 12px; }
+    .tool-block summary { cursor: pointer; color: #45506b; }
+    .tool-block pre { background: #101828; color: #d7e0f5; padding: 10px; border-radius: 8px; overflow-x: auto; }
+    #timeout-banner { background: #fffbeb; border: 1px solid #d97706; border-radius: 8px; padding: 8px 12px; font-size: 13px; color: #b45309; margin-bottom: 10px; }
+  </style>
+</head>
+<body>
+  <header class="topbar">
+    <span class="brand">试聊沙盒</span>
+    <nav class="topnav">
+        <a href="/app/workbench.html">质检工作台</a>
+      <a href="/app/">会话中心</a>
+      <a href="/app/knowledge.html">知识库</a>
+        <a href="/app/rag.html">召回测试台</a>
+      <a href="/app/sandbox.html" class="active">试聊沙盒</a>
+      <a href="/app/canned-preview.html">话术预览</a>
+    </nav>
+    <span id="who" class="who"></span>
+  </header>
+
+  <div class="page">
+    <div id="timeout-banner" class="hidden">沙盒已运行 28 分钟，将于 2 分钟后自动结束，请及时保存草稿。</div>
+    <div class="sandbox-grid">
+      <!-- 左：草稿规则双栏输入 -->
+      <div class="panel">
+        <h2>草稿规则（叠加到生产快照，同"当"覆盖）</h2>
+        <div class="draft-label">当……（condition）</div>
+        <textarea id="draft-condition" class="textarea-input" rows="3"
+          placeholder="旅客询问延误赔偿金额"></textarea>
+        <div class="draft-label">则……（action）</div>
+        <textarea id="draft-action" class="textarea-input" rows="3"
+          placeholder="不得承诺具体赔偿金额，引导至柜台咨询"></textarea>
+        <div style="margin-top:12px; display:flex; gap:8px;">
+          <button id="btn-start" class="btn primary">开始沙盒</button>
+          <button id="btn-stop" class="btn danger" disabled>结束沙盒</button>
+        </div>
+        <div id="sandbox-status" class="muted" style="margin-top:10px">
+          未开始。沙盒 = 生产配置快照 + 当前草稿叠加，独立 test agent，不影响线上。
+        </div>
+      </div>
+
+      <!-- 右：聊天窗 -->
+      <div class="panel">
+        <h2>沙盒对话</h2>
+        <div id="chat-box"><div class="muted">开始沙盒后在此试聊。</div></div>
+        <div id="chat-input-row">
+          <input id="chat-text" class="text-input" placeholder="输入旅客消息…" disabled />
+          <button id="btn-send" class="btn primary" disabled>发送</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    (function () {
+      "use strict";
+      var token = localStorage.getItem("pvg_admin_token") || "";
+      var role = localStorage.getItem("pvg_admin_role") || "";
+      if (!token) { location.href = "/app/"; return; }
+      document.getElementById("who").textContent =
+        (localStorage.getItem("pvg_admin_username") || "") + "（" + role + "）";
+
+      var AUTO_STOP_MS = 30 * 60 * 1000;   // 30 分钟自动 stop
+      var WARN_MS = 28 * 60 * 1000;        // 28 分钟提醒
+      var sandboxAgentId = null;
+      var warnTimer = null, stopTimer = null;
+
+      function $(id) { return document.getElementById(id); }
+      function esc(s) {
+        return String(s == null ? "" : s).replace(/[&<>"']/g, function (c) {
+          return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c];
+        });
+      }
+      function api(path, body) {
+        return fetch(path, {
+          method: "POST",
+          headers: { "Authorization": "Bearer " + token, "Content-Type": "application/json" },
+          body: JSON.stringify(body || {}),
+        }).then(function (resp) {
+          if (resp.status === 401) { location.href = "/app/"; throw new Error("登录失效"); }
+          return resp.json().then(function (j) {
+            if (!resp.ok) throw new Error(j.detail || ("HTTP " + resp.status));
+            return j;
+          });
+        });
+      }
+      function addMsg(cls, html) {
+        var div = document.createElement("div");
+        div.className = cls;
+        div.innerHTML = html;
+        $("chat-box").appendChild(div);
+        $("chat-box").scrollTop = $("chat-box").scrollHeight;
+        return div;
+      }
+
+      function start() {
+        var condition = $("draft-condition").value.trim();
+        var action = $("draft-action").value.trim();
+        var draft = condition ? { condition: condition } : null;
+        if (draft && action) draft.action = action;
+        $("btn-start").disabled = true;
+        api("/api/sandbox/start", { guideline_draft: draft }).then(function (r) {
+          sandboxAgentId = r.sandbox_agent_id;
+          $("sandbox-status").textContent =
+            "沙盒运行中：agent=" + sandboxAgentId +
+            " · 复制规则 " + r.copied_guidelines + " 条" +
+            (r.draft_overlaid ? " · 草稿已覆盖同condition规则" : "") +
+            (r.draft_appended ? " · 草稿已追加" : "");
+          $("btn-stop").disabled = false;
+          $("chat-text").disabled = false;
+          $("btn-send").disabled = false;
+          $("chat-box").innerHTML = "";
+          addMsg("msg ai", '<span class="tag">系统</span>沙盒已就绪（生产快照+草稿叠加），开始试聊。');
+          warnTimer = setTimeout(function () {
+            $("timeout-banner").classList.remove("hidden");
+          }, WARN_MS);
+          stopTimer = setTimeout(function () { stop(true); }, AUTO_STOP_MS);
+        }).catch(function (err) {
+          $("btn-start").disabled = false;
+          $("sandbox-status").innerHTML = '<span class="error-text">' + esc(err.message) + "</span>";
+        });
+      }
+
+      function stop(auto) {
+        if (!sandboxAgentId) return;
+        clearTimeout(warnTimer); clearTimeout(stopTimer);
+        api("/api/sandbox/stop", { sandbox_agent_id: sandboxAgentId }).then(function (r) {
+          addMsg("msg ai", '<span class="tag">系统</span>沙盒已结束（' +
+            (r.deleted ? "test agent 已删除" : "已停用 " + r.disabled_guidelines + " 条规则") + "）。" +
+            (auto ? "（30 分钟超时自动结束）" : ""));
+        }).catch(function () {
+          addMsg("msg ai", '<span class="tag">系统</span>沙盒结束请求失败，请人工核查 test agent。');
+        });
+        sandboxAgentId = null;
+        $("btn-start").disabled = false;
+        $("btn-stop").disabled = true;
+        $("chat-text").disabled = true;
+        $("btn-send").disabled = true;
+        $("timeout-banner").classList.add("hidden");
+        $("sandbox-status").textContent = "未开始。沙盒 = 生产配置快照 + 当前草稿叠加，独立 test agent，不影响线上。";
+      }
+
+      function send() {
+        var text = $("chat-text").value.trim();
+        if (!text || !sandboxAgentId) return;
+        $("chat-text").value = "";
+        addMsg("msg user", esc(text));
+        var thinking = addMsg("msg ai", '<span class="tag">AI</span>…');
+        api("/api/sandbox/chat", { sandbox_agent_id: sandboxAgentId, message: text })
+          .then(function (r) {
+            thinking.remove();
+            (r.messages || []).forEach(function (m) {
+              addMsg("msg ai",
+                (m.preamble ? '<span class="tag">占位 preamble</span>' : '<span class="tag">AI</span>') +
+                esc(m.text));
+            });
+            (r.tools || []).forEach(function (t) {
+              var det = document.createElement("details");
+              det.className = "tool-block";
+              det.innerHTML = "<summary>工具调用</summary><pre>" + esc(JSON.stringify(t, null, 2)) + "</pre>";
+              $("chat-box").appendChild(det);
+            });
+            $("chat-box").scrollTop = $("chat-box").scrollHeight;
+          })
+          .catch(function (err) {
+            thinking.innerHTML = '<span class="tag">错误</span><span class="error-text">' + esc(err.message) + "</span>";
+          });
+      }
+
+      $("btn-start").addEventListener("click", start);
+      $("btn-stop").addEventListener("click", function () { stop(false); });
+      $("btn-send").addEventListener("click", send);
+      $("chat-text").addEventListener("keydown", function (e) { if (e.key === "Enter") send(); });
+    })();
+  </script>
+</body>
+</html>

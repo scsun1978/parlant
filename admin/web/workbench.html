@@ -1,0 +1,546 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>质检工作台 · PVG 智能客服运营后台</title>
+  <link rel="stylesheet" href="styles.css" />
+  <style>
+    .wb-layout { display: grid; grid-template-columns: 300px 1fr; height: calc(100vh - 44px); }
+    aside { overflow-y: auto; }
+    main { overflow-y: auto; padding: 14px 18px; }
+    /* 步骤条 */
+    .steps { display: flex; gap: 0; margin-bottom: 6px; }
+    .step { flex: 1; text-align: center; padding: 10px 4px; font-size: 13px; color: #9aa3b8; border-bottom: 3px solid #e3e7ef; }
+    .step .num { display: inline-block; width: 22px; height: 22px; line-height: 22px; border-radius: 50%; background: #e5e9f2; color: #6b7690; margin-right: 6px; font-size: 12px; }
+    .step.done { color: #059669; border-color: #059669; }
+    .step.done .num { background: #059669; color: #fff; }
+    .step.current { color: #1c2333; font-weight: 600; border-color: #2563eb; }
+    .step.current .num { background: #2563eb; color: #fff; }
+    .step-hint { text-align: center; color: #6b7690; font-size: 13px; margin-bottom: 14px; }
+    /* 气泡回放 */
+    #wb-chat { max-height: 42vh; overflow-y: auto; background: #f6f8fc; border-radius: 8px; padding: 12px; }
+    .bubble { max-width: 75%; margin-bottom: 8px; padding: 8px 12px; border-radius: 12px; font-size: 13px; white-space: pre-wrap; word-break: break-word; }
+    .bubble.customer { background: #2563eb; color: #fff; margin-left: auto; }
+    .bubble.ai_agent { background: #fff; border: 1px solid #e3e7ef; margin-right: auto; }
+    .bubble.human_agent { background: #059669; color: #fff; margin-right: auto; }
+    .bubble .who-line { font-size: 11px; opacity: .7; margin-bottom: 2px; }
+    .bubble .tag { font-size: 11px; background: rgba(0,0,0,.10); border-radius: 6px; padding: 0 6px; }
+    .tool-chip { display: inline-block; font-size: 12px; background: #eceff5; border-radius: 10px; padding: 3px 10px; cursor: pointer; margin: 3px 0; color: #45506b; }
+    .tool-chip:hover { background: #dbe4f3; }
+    .tool-detail { background: #101828; color: #d7e0f5; padding: 10px; border-radius: 8px; font-size: 11px; overflow-x: auto; margin: 4px 0 8px; white-space: pre-wrap; }
+    .engine-toggle { font-size: 12px; color: #6b7690; cursor: pointer; user-select: none; margin: 6px 0; }
+    .stage-strip { display: flex; flex-wrap: wrap; gap: 6px; margin: 4px 0 8px; }
+    .stage-strip .chip { font-size: 11px; color: #6b7690; background: #eceff5; border-radius: 10px; padding: 2px 8px; }
+    .stage-strip .chip.error { color: #b91c1c; background: #fee2e2; }
+    /* 归因卡片 */
+    .attr-cards { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin: 10px 0; }
+    .attr-card { border: 2px solid #e3e7ef; border-radius: 10px; padding: 12px; cursor: pointer; }
+    .attr-card:hover { border-color: #93b4f5; }
+    .attr-card.selected { border-color: #2563eb; background: #eef4ff; }
+    .attr-card .t { font-size: 14px; font-weight: 600; margin-bottom: 4px; }
+    .attr-card .e { font-size: 12px; color: #6b7690; }
+    /* 对比视图 */
+    .compare { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin: 10px 0; }
+    .compare .box { border-radius: 10px; padding: 12px; font-size: 13px; white-space: pre-wrap; }
+    .compare .bad { background: #fef2f2; border: 1px solid #fecaca; }
+    .compare .good { background: #ecfdf5; border: 1px solid #a7f3d0; }
+    .compare .cap { font-size: 12px; color: #6b7690; margin-bottom: 6px; }
+    .big-actions { display: flex; gap: 12px; margin-top: 12px; }
+    .big-actions .btn { flex: 1; padding: 12px; font-size: 14px; }
+    .queue-group h3 { font-size: 12px; color: #6b7690; margin: 0 0 6px; display: flex; gap: 6px; align-items: center; }
+    .queue-group { margin-bottom: 14px; }
+    .count-badge { font-size: 11px; background: #e5e9f2; border-radius: 8px; padding: 1px 7px; color: #45506b; }
+    .case-item { padding: 9px 10px; border-radius: 8px; border: 1px solid transparent; cursor: pointer; margin-bottom: 6px; }
+    .case-item:hover { background: #f0f4fb; }
+    .case-item.active { border-color: #2563eb; background: #eef4ff; }
+    .case-item .t { font-size: 13px; font-weight: 500; }
+    .case-item .m { font-size: 11px; color: #6b7690; margin-top: 3px; }
+    .empty-state { text-align: center; color: #9aa3b8; padding: 24px 8px; font-size: 13px; }
+    .kv { font-size: 12px; color: #45506b; margin-bottom: 4px; word-break: break-all; }
+    .draft-label { font-size: 12px; color: #45506b; margin: 8px 0 3px; }
+  </style>
+</head>
+<body>
+  <header class="topbar">
+    <span class="brand">质检工作台</span>
+    <nav class="topnav">
+      <a href="/app/workbench.html" class="active">质检工作台</a>
+      <a href="/app/">会话中心</a>
+      <a href="/app/knowledge.html">知识库</a>
+      <a href="/app/rag.html">召回测试台</a>
+      <a href="/app/sandbox.html">试聊沙盒</a>
+      <a href="/app/canned-preview.html">话术预览</a>
+    </nav>
+    <span id="who" class="who"></span>
+  </header>
+
+  <div class="wb-layout">
+    <!-- 左：队列 + 已读不回告警 -->
+    <aside>
+      <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
+        <h2 style="font-size:13px; color:#6b7690; margin:0;">BAD CASE 队列</h2>
+        <button id="btn-intake" class="btn primary" title="扫描转人工会话摄入复盘">摄入转人工复盘</button>
+      </div>
+      <div id="queues"></div>
+      <h2 style="font-size:13px; color:#6b7690; margin:14px 0 8px;">已读不回告警</h2>
+      <div id="alerts"></div>
+    </aside>
+
+    <!-- 主区：向导 -->
+    <main>
+      <div id="detail-empty" class="empty-state" style="padding-top:60px;">
+        ← 从左侧选一个 bad case 开始处理。<br />每一条都要走完四步：复盘归因 → 修复 → 重放验证 → 完成。
+      </div>
+      <div id="detail" class="hidden">
+        <div class="panel" style="margin-bottom:12px;">
+          <div style="font-size:15px; font-weight:600;" id="case-title"></div>
+          <div class="muted" id="case-meta" style="margin-top:4px;"></div>
+        </div>
+        <div class="steps" id="steps"></div>
+        <div class="step-hint" id="step-hint"></div>
+        <div id="step-body"></div>
+      </div>
+    </main>
+  </div>
+
+  <script>
+    (function () {
+      "use strict";
+      var token = localStorage.getItem("pvg_admin_token") || "";
+      var role = localStorage.getItem("pvg_admin_role") || "";
+      if (!token) { location.href = "/app/"; return; }
+      document.getElementById("who").textContent =
+        (localStorage.getItem("pvg_admin_username") || "") + "（" + role + "）";
+
+      // 四步：状态 → 步骤号；每步一句人话提示
+      var STEPS = [
+        { key: "pending_review", name: "① 复盘归因", hint: "读一遍会话，判断这条回答错在哪。" },
+        { key: "pending_fix", name: "② 修复", hint: "选一种方式修掉它：补知识、补规则、报工具、记样本。" },
+        { key: "pending_verify", name: "③ 重放验证", hint: "沙盒里把旅客的问题再问一遍，看重放答得好不好。" },
+        { key: "closed", name: "④ 完成", hint: "已归档，用例已进入回归集，以后每次变更都会自动复测。" },
+      ];
+      var SOURCE_NAMES = { handoff_review: "转人工复盘", manual_sample: "人工抽检", alert_no_reply: "已读不回" };
+      var ATTRS = {
+        knowledge: { t: "知识库里没有这条规定", e: "例：旅客问捷运末班车，知识库没收录 → AI 只能瞎猜或说不知道" },
+        rule: { t: "没教过 AI 怎么处理这类问题", e: "例：旅客说方言/错字或新场景，规则没覆盖" },
+        tool: { t: "工具/系统没答上来", e: "例：航班接口超时、查不到数据" },
+        model: { t: "模型自己说错了", e: "例：答非所问、编造、格式乱" },
+      };
+      var current = null, currentEvents = [], selectedAttr = null, showEngine = false;
+
+      function $(id) { return document.getElementById(id); }
+      function esc(s) {
+        return String(s == null ? "" : s).replace(/[&<>"']/g, function (c) {
+          return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c];
+        });
+      }
+      function api(path, options) {
+        options = options || {};
+        options.headers = Object.assign(
+          { "Authorization": "Bearer " + token },
+          options.body ? { "Content-Type": "application/json" } : {},
+          options.headers || {});
+        return fetch(path, options).then(function (resp) {
+          if (resp.status === 401) { location.href = "/app/"; throw new Error("登录失效"); }
+          return resp.json().then(function (j) {
+            if (!resp.ok) throw new Error(j.detail || ("HTTP " + resp.status));
+            return j;
+          });
+        });
+      }
+      function post(path, body) { return api(path, { method: "POST", body: JSON.stringify(body || {}) }); }
+      function canWrite() { return ["operator", "reviewer", "admin"].indexOf(role) >= 0; }
+      function canReview() { return ["reviewer", "admin"].indexOf(role) >= 0; }
+      function stepIndex(status) { for (var i = 0; i < STEPS.length; i++) if (STEPS[i].key === status) return i; return 0; }
+
+      // ---------- 左栏：队列 / 告警 ----------
+
+      function refreshQueues() {
+        api("/api/bad-cases?limit=200").then(function (body) {
+          var byStatus = { pending_review: [], pending_fix: [], pending_verify: [], closed: [] };
+          (body.items || []).forEach(function (c) { (byStatus[c.status] || []).push(c); });
+          var box = $("queues");
+          box.innerHTML = "";
+          var openTotal = (body.counts.pending_review || 0) + (body.counts.pending_fix || 0) + (body.counts.pending_verify || 0);
+          if (openTotal === 0 && (body.counts.closed || 0) === 0) {
+            box.innerHTML = '<div class="empty-state">太棒了，没有待处理的 bad case。<br>点右上"摄入转人工复盘"扫描转人工会话。</div>';
+          }
+          STEPS.forEach(function (st) {
+            var group = document.createElement("div");
+            group.className = "queue-group";
+            group.innerHTML = "<h3>" + st.name.replace(/^.\s/, "") +
+              ' <span class="count-badge">' + (body.counts[st.key] || 0) + "</span></h3>";
+            byStatus[st.key].forEach(function (c) {
+              var item = document.createElement("div");
+              item.className = "case-item" + (current && current.id === c.id ? " active" : "");
+              item.innerHTML = '<div class="t">' + esc(c.title) + "</div>" +
+                '<div class="m">' + esc(SOURCE_NAMES[c.source] || c.source) +
+                (c.attribution ? " · " + esc(ATTRS[c.attribution] ? ATTRS[c.attribution].t : c.attribution) : "") + "</div>";
+              item.addEventListener("click", function () { selectCase(c.id); });
+              group.appendChild(item);
+            });
+            box.appendChild(group);
+          });
+        });
+      }
+
+      function refreshAlerts() {
+        api("/api/bad-cases/no-reply-alerts").then(function (body) {
+          var box = $("alerts");
+          if (!body.items.length) { box.innerHTML = '<div class="muted" style="font-size:12px">暂无。</div>'; return; }
+          box.innerHTML = "";
+          body.items.forEach(function (a) {
+            var div = document.createElement("div");
+            div.className = "case-item";
+            div.innerHTML = '<div class="t">' + esc(a.title) + "</div>" +
+              '<div class="m">' + esc(a.session_id) + (a.has_error_status ? " · 引擎报错" : " · 未回复") + "</div>";
+            box.appendChild(div);
+          });
+        });
+      }
+
+      $("btn-intake").addEventListener("click", function () {
+        post("/api/bad-cases/intake").then(function (r) {
+          refreshQueues();
+        }).catch(function (err) { alert("摄入失败：" + err.message); });
+      });
+      if (!canWrite()) $("btn-intake").classList.add("hidden");
+
+      // ---------- 主区：向导 ----------
+
+      function selectCase(id) {
+        api("/api/bad-cases/" + id).then(function (body) {
+          current = body.case;
+          currentEvents = body.events || [];
+          selectedAttr = null;
+          showEngine = false;
+          $("detail-empty").classList.add("hidden");
+          $("detail").classList.remove("hidden");
+          $("case-title").textContent = current.title;
+          $("case-meta").textContent =
+            "来源：" + (SOURCE_NAMES[current.source] || current.source) +
+            " · 会话：" + current.session_id +
+            " · 创建：" + current.created_by + " " + (current.created_at || "").slice(0, 19);
+          renderSteps();
+          renderStepBody();
+          refreshQueues();
+        });
+      }
+
+      function renderSteps() {
+        var idx = stepIndex(current.status);
+        var box = $("steps");
+        box.innerHTML = "";
+        STEPS.forEach(function (st, i) {
+          var div = document.createElement("div");
+          div.className = "step" + (i < idx ? " done" : i === idx ? " current" : "");
+          div.innerHTML = '<span class="num">' + (i < idx ? "✓" : i + 1) + "</span>" + esc(st.name.replace(/^.\s/, ""));
+          box.appendChild(div);
+        });
+        $("step-hint").textContent = STEPS[idx].hint;
+      }
+
+      function renderStepBody() {
+        var idx = stepIndex(current.status);
+        var body = $("step-body");
+        body.innerHTML = "";
+        if (idx === 0) renderReviewStep(body);
+        else if (idx === 1) renderFixStep(body);
+        else if (idx === 2) renderVerifyStep(body);
+        else renderClosedStep(body);
+      }
+
+      // 步骤①：回放 + 归因
+      function renderReviewStep(body) {
+        var panel = document.createElement("div");
+        panel.className = "panel";
+        panel.innerHTML = "<h2>会话回放</h2>";
+        var toggle = document.createElement("div");
+        toggle.className = "engine-toggle";
+        toggle.textContent = showEngine ? "▾ 隐藏引擎过程" : "▸ 显示引擎过程（status 事件）";
+        toggle.addEventListener("click", function () { showEngine = !showEngine; renderStepBody(); });
+        panel.appendChild(toggle);
+        var chat = document.createElement("div");
+        chat.id = "wb-chat";
+        panel.appendChild(chat);
+        body.appendChild(panel);
+        renderChat(chat);
+
+        var attrPanel = document.createElement("div");
+        attrPanel.className = "panel";
+        attrPanel.innerHTML = "<h2>这条回答错在哪？</h2>";
+        var cards = document.createElement("div");
+        cards.className = "attr-cards";
+        Object.keys(ATTRS).forEach(function (key) {
+          var card = document.createElement("div");
+          card.className = "attr-card";
+          card.innerHTML = '<div class="t">' + esc(ATTRS[key].t) + '</div><div class="e">' + esc(ATTRS[key].e) + "</div>";
+          card.addEventListener("click", function () {
+            selectedAttr = key;
+            cards.querySelectorAll(".attr-card").forEach(function (c) { c.classList.remove("selected"); });
+            card.classList.add("selected");
+            submitBtn.classList.remove("hidden");
+            noteInput.classList.remove("hidden");
+          });
+          if (!canWrite()) card.style.pointerEvents = "none", card.style.opacity = ".6";
+          cards.appendChild(card);
+        });
+        attrPanel.appendChild(cards);
+        var noteInput = document.createElement("input");
+        noteInput.className = "text-input hidden";
+        noteInput.style.width = "100%";
+        noteInput.placeholder = "补充说明（可选）";
+        var submitBtn = document.createElement("button");
+        submitBtn.className = "btn primary hidden";
+        submitBtn.style.marginTop = "8px";
+        submitBtn.textContent = "确认归因，去修复";
+        submitBtn.addEventListener("click", function () {
+          if (!selectedAttr) return;
+          submitBtn.disabled = true;
+          post("/api/bad-cases/" + current.id + "/attribute", {
+            type: selectedAttr, note: noteInput.value.trim(),
+          }).then(function () { selectCase(current.id); })
+            .catch(function (err) { submitBtn.disabled = false; alert("归因失败：" + err.message); });
+        });
+        attrPanel.appendChild(noteInput);
+        attrPanel.appendChild(submitBtn);
+        body.appendChild(attrPanel);
+      }
+
+      function isPreamble(ev) {
+        var d = ev.data || {};
+        return d.preamble === true || (d.metadata && d.metadata.preamble === true);
+      }
+      function toolName(ev) {
+        var d = ev.data || {};
+        var calls = d.tool_calls || d.toolCalls || [];
+        if (calls.length && calls[0].tool_name) return calls[0].tool_name;
+        return d.tool_name || d.service_name || "工具";
+      }
+
+      function renderChat(chat) {
+        var statusBuffer = [];
+        function flushStatus() {
+          if (!showEngine || !statusBuffer.length) { statusBuffer = []; return; }
+          var strip = document.createElement("div");
+          strip.className = "stage-strip";
+          statusBuffer.forEach(function (ev) {
+            var d = (ev.data && ev.data.data) || {};
+            var status = (ev.data && ev.data.status) || "?";
+            var chip = document.createElement("span");
+            chip.className = "chip" + (status === "error" ? " error" : "");
+            chip.textContent = status + (d.stage ? ":" + d.stage : "");
+            strip.appendChild(chip);
+          });
+          chat.appendChild(strip);
+          statusBuffer = [];
+        }
+        currentEvents.forEach(function (ev) {
+          if (ev.kind === "status") { statusBuffer.push(ev); return; }
+          flushStatus();
+          if (ev.kind === "message") {
+            var div = document.createElement("div");
+            div.className = "bubble " + (ev.source || "customer");
+            var who = ev.source === "customer" ? "旅客" : ev.source === "human_agent" ? "坐席" : "AI";
+            var name = (ev.data && ev.data.participant && ev.data.participant.display_name) || who;
+            div.innerHTML = '<div class="who-line">' + esc(name) +
+              (isPreamble(ev) ? ' <span class="tag">AI 先说了一句占位话</span>' : "") + "</div>" +
+              esc((ev.data && ev.data.message) || "");
+            chat.appendChild(div);
+          } else if (ev.kind === "tool") {
+            var chip = document.createElement("span");
+            chip.className = "tool-chip";
+            chip.textContent = "🔧 查了 " + toolName(ev);
+            var det = document.createElement("div");
+            det.className = "tool-detail hidden";
+            det.textContent = JSON.stringify(ev.data, null, 2);
+            chip.addEventListener("click", function () { det.classList.toggle("hidden"); });
+            chat.appendChild(chip);
+            chat.appendChild(det);
+          }
+        });
+        flushStatus();
+      }
+
+      // 步骤②：修复向导
+      function renderFixStep(body) {
+        var panel = document.createElement("div");
+        panel.className = "panel";
+        var attr = current.attribution;
+        var p = current.prefill || {};
+        panel.innerHTML = "<h2>修复：" + esc(ATTRS[attr] ? ATTRS[attr].t : attr || "") + "</h2>";
+        body.appendChild(panel);
+
+        function done(msg) {
+          panel.innerHTML = '<div style="color:#059669; font-size:14px; padding:8px 0;">✓ ' + esc(msg) + "</div>";
+          setTimeout(function () { selectCase(current.id); }, 800);
+        }
+        function field(label, id, rows, val) {
+          return '<div class="draft-label">' + esc(label) + "</div>" +
+            '<textarea id="' + id + '" class="textarea-input" rows="' + rows + '">' + esc(val || "") + "</textarea>";
+        }
+
+        if (attr === "knowledge") {
+          panel.innerHTML +=
+            field("旅客问题", "f-q", 2, p.question) +
+            field("AI 当时的错误回答", "f-w", 2, p.wrong_answer) +
+            field("建议答案（写进知识库）", "f-a", 4, p.suggested_answer) +
+            '<button id="f-submit" class="btn primary" style="margin-top:8px">提交知识补录草稿</button>' +
+            '<div id="f-status" class="status-line muted"></div>';
+          panel.querySelector("#f-submit").addEventListener("click", function () {
+            post("/api/knowledge/drafts", {
+              question: $("f-q").value.trim(),
+              wrong_answer: $("f-w").value.trim(),
+              suggested_answer: $("f-a").value.trim(),
+              session_id: current.session_id,
+              bad_case_id: current.id,
+            }).then(function (draft) {
+              return post("/api/bad-cases/" + current.id + "/link-fix", {
+                ref_type: "knowledge_draft", ref_id: draft.id,
+              }).then(function () {
+                done("知识补录草稿已建（等审核发布），已挂接，去重放验证。");
+              });
+            }).catch(function (err) { $("f-status").innerHTML = '<span class="error-text">' + esc(err.message) + "</span>"; });
+          });
+        } else if (attr === "rule") {
+          panel.innerHTML +=
+            field("当……（condition，已预填旅客问法）", "f-c", 2, p.condition) +
+            field("则……（action，填写建议口径）", "f-a", 3, p.action) +
+            '<button id="f-submit" class="btn primary" style="margin-top:8px">提交规则草稿并挂接</button>' +
+            '<div id="f-status" class="status-line muted"></div>';
+          panel.querySelector("#f-submit").addEventListener("click", function () {
+            post("/api/guidelines/draft", {
+              condition: $("f-c").value.trim(), action: $("f-a").value.trim(),
+            }).then(function (draft) {
+              return post("/api/bad-cases/" + current.id + "/link-fix", {
+                ref_type: "guideline_draft", ref_id: draft.id,
+              }).then(function () { done("规则草稿已提交审批，已挂接，去重放验证。"); });
+            }).catch(function (err) { $("f-status").innerHTML = '<span class="error-text">' + esc(err.message) + "</span>"; });
+          });
+        } else if (attr === "tool") {
+          var ticket = "【工具工单】\n会话：" + current.session_id + "\n问题：" + (p.note || current.title) +
+            "\n请排查工具调用入参/错误/耗时。";
+          panel.innerHTML +=
+            field("工单文本（可复制给工具负责人）", "f-t", 6, ticket) +
+            '<div style="display:flex; gap:8px; margin-top:8px;">' +
+            '<button id="f-copy" class="btn">复制工单</button>' +
+            '<input id="f-tid" class="text-input" style="flex:1" placeholder="工单号（填入后挂接）" />' +
+            '<button id="f-link" class="btn primary">挂接</button></div>' +
+            '<div id="f-status" class="status-line muted"></div>';
+          panel.querySelector("#f-copy").addEventListener("click", function () {
+            navigator.clipboard.writeText($("f-t").value);
+            $("f-status").textContent = "已复制。";
+          });
+          panel.querySelector("#f-link").addEventListener("click", function () {
+            post("/api/bad-cases/" + current.id + "/link-fix", {
+              ref_type: "tool_ticket", ref_id: $("f-tid").value.trim() || "ticket-" + current.id,
+            }).then(function () { done("工单已挂接，去重放验证。"); })
+              .catch(function (err) { $("f-status").innerHTML = '<span class="error-text">' + esc(err.message) + "</span>"; });
+          });
+        } else {
+          panel.innerHTML +=
+            '<div class="kv"><b>问题样本</b>：' + esc(p.question || current.title) + "</div>" +
+            '<div class="muted" style="margin:6px 0">确认后该样本进入对抗语料（含"模型输出不稳定"子类）。</div>' +
+            '<button id="f-submit" class="btn primary">确认入对抗样本并挂接</button>' +
+            '<div id="f-status" class="status-line muted"></div>';
+          panel.querySelector("#f-submit").addEventListener("click", function () {
+            post("/api/bad-cases/" + current.id + "/link-fix", {
+              ref_type: "corpus_item", ref_id: "corpus-" + current.id,
+            }).then(function () { done("样本已入对抗语料，已挂接，去重放验证。"); })
+              .catch(function (err) { $("f-status").innerHTML = '<span class="error-text">' + esc(err.message) + "</span>"; });
+          });
+        }
+        if (!canWrite()) {
+          panel.querySelectorAll("button, textarea, input").forEach(function (el) { el.disabled = true; });
+        }
+      }
+
+      // 步骤③：重放验证（错答 vs 新答）
+      function renderVerifyStep(body) {
+        var panel = document.createElement("div");
+        panel.className = "panel";
+        panel.innerHTML = "<h2>重放验证</h2>";
+        body.appendChild(panel);
+        var wrong = (current.prefill && current.prefill.wrong_answer) || lastAiMessage() || "（无记录）";
+
+        if (!current.verify) {
+          var btn = document.createElement("button");
+          btn.className = "btn primary";
+          btn.textContent = "开始沙盒重放（约 1 分钟）";
+          if (!canReview()) btn.disabled = true;
+          btn.addEventListener("click", function () {
+            btn.disabled = true;
+            btn.textContent = "沙盒重放中，请稍等…";
+            post("/api/bad-cases/" + current.id + "/verify").then(function (c) {
+              current = c;
+              renderStepBody();
+            }).catch(function (err) {
+              btn.disabled = false;
+              btn.textContent = "开始沙盒重放（约 1 分钟）";
+              alert("重放失败：" + err.message);
+            });
+          });
+          panel.appendChild(btn);
+          return;
+        }
+
+        var cmp = document.createElement("div");
+        cmp.className = "compare";
+        cmp.innerHTML =
+          '<div class="box bad"><div class="cap">当时的错答</div>' + esc(wrong) + "</div>" +
+          '<div class="box good"><div class="cap">重放的新答（' + esc(current.verify.checked_by) + " " +
+          esc((current.verify.checked_at || "").slice(0, 19)) + "）</div>" + esc(current.verify.reply) + "</div>";
+        panel.appendChild(cmp);
+
+        if (canReview()) {
+          var actions = document.createElement("div");
+          actions.className = "big-actions";
+          var okBtn = document.createElement("button");
+          okBtn.className = "btn primary";
+          okBtn.textContent = "答得好，关闭";
+          okBtn.addEventListener("click", function () {
+            post("/api/bad-cases/" + current.id + "/close").then(function () { selectCase(current.id); })
+              .catch(function (err) { alert("关闭失败：" + err.message); });
+          });
+          var noBtn = document.createElement("button");
+          noBtn.className = "btn";
+          noBtn.textContent = "还不行，重新修";
+          noBtn.addEventListener("click", function () {
+            post("/api/bad-cases/" + current.id + "/reopen").then(function () { selectCase(current.id); })
+              .catch(function (err) { alert("打回失败：" + err.message); });
+          });
+          actions.appendChild(okBtn);
+          actions.appendChild(noBtn);
+          panel.appendChild(actions);
+        } else {
+          panel.innerHTML += '<div class="muted">等待审核员确认。</div>';
+        }
+      }
+
+      function lastAiMessage() {
+        for (var i = currentEvents.length - 1; i >= 0; i--) {
+          var ev = currentEvents[i];
+          if (ev.kind === "message" && ev.source === "ai_agent") return (ev.data || {}).message || "";
+        }
+        return "";
+      }
+
+      // 步骤④：完成
+      function renderClosedStep(body) {
+        var panel = document.createElement("div");
+        panel.className = "panel";
+        panel.innerHTML = "<h2>已完成</h2>" +
+          '<div style="color:#059669; font-size:14px; padding:6px 0;">✓ 这条 bad case 已归档，问题样本已进入回归集。</div>' +
+          '<div class="kv"><b>关闭时间</b>：' + esc(current.closed_at || "") + "</div>" +
+          (current.fix_ref ? '<div class="kv"><b>修复物</b>：' + esc(current.fix_ref.type) + " / " + esc(current.fix_ref.id) + "</div>" : "") +
+          (current.verify ? '<div class="kv"><b>重放人</b>：' + esc(current.verify.checked_by) + "</div>" : "");
+        body.appendChild(panel);
+      }
+
+      refreshQueues();
+      refreshAlerts();
+    })();
+  </script>
+</body>
+</html>

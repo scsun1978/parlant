@@ -1,0 +1,344 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>知识库 · PVG 智能客服运营后台</title>
+  <link rel="stylesheet" href="styles.css" />
+  <style>
+    .tabs { display: flex; gap: 4px; margin-bottom: 14px; border-bottom: 1px solid #e3e7ef; }
+    .tabs button { background: none; border: 0; padding: 8px 18px; font-size: 14px; cursor: pointer; color: #6b7690; border-bottom: 2px solid transparent; }
+    .tabs button.active { color: #2563eb; border-bottom-color: #2563eb; font-weight: 600; }
+    .docs-layout { display: grid; grid-template-columns: 1fr 420px; gap: 14px; }
+    table.tb { width: 100%; border-collapse: collapse; font-size: 13px; }
+    table.tb th { text-align: left; color: #6b7690; font-size: 12px; padding: 6px 8px; border-bottom: 1px solid #e3e7ef; }
+    table.tb td { padding: 8px; border-bottom: 1px solid #f0f2f7; vertical-align: top; }
+    table.tb tr.row { cursor: pointer; }
+    table.tb tr.row:hover { background: #f0f4fb; }
+    .state-badge { font-size: 11px; padding: 1px 8px; border-radius: 8px; }
+    .state-badge.valid { background: #dcfce7; color: #15803d; }
+    .state-badge.expiring { background: #fef3c7; color: #b45309; }
+    .state-badge.expired { background: #fee2e2; color: #b91c1c; }
+    .stat-cards { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; margin-bottom: 14px; }
+    .stat-card { background: #fff; border: 1px solid #e3e7ef; border-radius: 10px; padding: 14px; }
+    .stat-card .v { font-size: 22px; font-weight: 700; }
+    .stat-card .k { font-size: 12px; color: #6b7690; margin-top: 4px; }
+    .pager { display: flex; gap: 8px; align-items: center; margin-top: 10px; font-size: 13px; }
+    .draft-group { margin-bottom: 16px; }
+    .draft-group h3 { font-size: 13px; color: #6b7690; margin: 0 0 8px; }
+    .draft-item { border: 1px solid #e3e7ef; border-radius: 8px; padding: 10px 12px; margin-bottom: 8px; }
+    .draft-item .q { font-weight: 500; font-size: 13px; }
+    .draft-item .a { font-size: 12px; color: #45506b; margin-top: 4px; white-space: pre-wrap; }
+    .draft-item .m { font-size: 11px; color: #6b7690; margin-top: 4px; }
+    #doc-full { white-space: pre-wrap; font-size: 13px; max-height: 70vh; overflow-y: auto; }
+    .filters { display: flex; gap: 8px; margin-bottom: 12px; flex-wrap: wrap; }
+  </style>
+</head>
+<body>
+  <header class="topbar">
+    <span class="brand">知识库</span>
+    <nav class="topnav">
+      <a href="/app/workbench.html">质检工作台</a>
+      <a href="/app/">会话中心</a>
+      <a href="/app/knowledge.html" class="active">知识库</a>
+      <a href="/app/rag.html">召回测试台</a>
+      <a href="/app/sandbox.html">试聊沙盒</a>
+      <a href="/app/canned-preview.html">话术预览</a>
+    </nav>
+    <span id="who" class="who"></span>
+  </header>
+
+  <div class="page">
+    <div class="tabs">
+      <button data-tab="docs" class="active">文档浏览</button>
+      <button data-tab="gaps">缺口看板</button>
+      <button data-tab="drafts">补录草稿</button>
+    </div>
+
+    <!-- 标签 1：文档浏览 -->
+    <div id="tab-docs">
+      <div class="panel">
+        <div class="filters">
+          <input id="d-q" class="text-input" style="flex:1; min-width:220px" placeholder="标题/正文模糊搜索" />
+          <select id="d-type" class="select-input"><option value="">全部类型</option></select>
+          <select id="d-state" class="select-input">
+            <option value="">全部状态</option>
+            <option value="valid">生效中</option>
+            <option value="expiring">临期（7 天）</option>
+            <option value="expired">已过期</option>
+          </select>
+          <button id="d-search" class="btn primary">搜索</button>
+        </div>
+        <div class="docs-layout">
+          <div>
+            <table class="tb">
+              <thead><tr><th>标题</th><th>类型</th><th>有效期至</th><th>状态</th></tr></thead>
+              <tbody id="d-rows"></tbody>
+            </table>
+            <div class="pager">
+              <button id="d-prev" class="btn">上一页</button>
+              <span id="d-pageinfo" class="muted"></span>
+              <button id="d-next" class="btn">下一页</button>
+            </div>
+          </div>
+          <div class="panel" style="margin:0">
+            <h2>全文</h2>
+            <div id="doc-full"><span class="muted">点击左侧文档查看全文。</span></div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 标签 2：缺口看板 -->
+    <div id="tab-gaps" class="hidden">
+      <div class="stat-cards">
+        <div class="stat-card"><div class="v" id="g-days">—</div><div class="k">统计窗口（天）</div></div>
+        <div class="stat-card"><div class="v" id="g-total">—</div><div class="k">总查询数</div></div>
+        <div class="stat-card"><div class="v" id="g-nohit">—</div><div class="k">未命中数</div></div>
+        <div class="stat-card"><div class="v" id="g-ratio">—</div><div class="k">未命中占比</div></div>
+      </div>
+      <div class="panel">
+        <h2>答不上来的问题 Top N（点"补录"直接建草稿）</h2>
+        <table class="tb">
+          <thead><tr><th>问题</th><th>次数</th><th>最近出现</th><th></th></tr></thead>
+          <tbody id="g-rows"></tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- 标签 3：补录草稿 -->
+    <div id="tab-drafts" class="hidden">
+      <div class="docs-layout">
+        <div>
+          <div id="draft-groups"></div>
+        </div>
+        <div class="panel" style="margin:0" id="draft-new-panel">
+          <h2>新建补录草稿</h2>
+          <div class="draft-label">旅客问题（必填）</div>
+          <textarea id="n-q" class="textarea-input" rows="2"></textarea>
+          <div class="draft-label">建议答案（必填，写进知识库）</div>
+          <textarea id="n-a" class="textarea-input" rows="4"></textarea>
+          <div class="draft-label">AI 当时的错误回答（选填）</div>
+          <textarea id="n-w" class="textarea-input" rows="2"></textarea>
+          <button id="n-submit" class="btn primary" style="margin-top:10px">提交草稿</button>
+          <div id="n-status" class="status-line muted"></div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    (function () {
+      "use strict";
+      var token = localStorage.getItem("pvg_admin_token") || "";
+      var role = localStorage.getItem("pvg_admin_role") || "";
+      if (!token) { location.href = "/app/"; return; }
+      document.getElementById("who").textContent =
+        (localStorage.getItem("pvg_admin_username") || "") + "（" + role + "）";
+
+      function $(id) { return document.getElementById(id); }
+      function esc(s) {
+        return String(s == null ? "" : s).replace(/[&<>"']/g, function (c) {
+          return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c];
+        });
+      }
+      function api(path, options) {
+        options = options || {};
+        options.headers = Object.assign(
+          { "Authorization": "Bearer " + token },
+          options.body ? { "Content-Type": "application/json" } : {},
+          options.headers || {});
+        return fetch(path, options).then(function (resp) {
+          if (resp.status === 401) { location.href = "/app/"; throw new Error("登录失效"); }
+          return resp.json().then(function (j) {
+            if (!resp.ok) throw new Error(j.detail || ("HTTP " + resp.status));
+            return j;
+          });
+        });
+      }
+      function post(path, body) { return api(path, { method: "POST", body: JSON.stringify(body || {}) }); }
+      var STATE_NAMES = { valid: "生效中", expiring: "临期", expired: "已过期" };
+      var DRAFT_STATUS = { pending_review: "待审核", published: "已发布", approved: "已审待发布", rejected: "已打回" };
+
+      // ---------- 标签切换 ----------
+      document.querySelectorAll(".tabs button").forEach(function (b) {
+        b.addEventListener("click", function () {
+          document.querySelectorAll(".tabs button").forEach(function (x) { x.classList.remove("active"); });
+          b.classList.add("active");
+          ["docs", "gaps", "drafts"].forEach(function (t) {
+            $("tab-" + t).classList.toggle("hidden", t !== b.getAttribute("data-tab"));
+          });
+          var tab = b.getAttribute("data-tab");
+          if (tab === "gaps") loadGaps();
+          if (tab === "drafts") loadDrafts();
+        });
+      });
+
+      // ---------- 文档浏览 ----------
+      var dPage = 1, dTotal = 0, D_SIZE = 20;
+      function loadDocs() {
+        var params = "page=" + dPage + "&page_size=" + D_SIZE;
+        if ($("d-q").value.trim()) params += "&q=" + encodeURIComponent($("d-q").value.trim());
+        if ($("d-type").value) params += "&knowledge_type=" + encodeURIComponent($("d-type").value);
+        if ($("d-state").value) params += "&valid_state=" + encodeURIComponent($("d-state").value);
+        api("/api/knowledge/docs?" + params).then(function (body) {
+          dTotal = body.total;
+          var rows = $("d-rows");
+          rows.innerHTML = "";
+          var types = {};
+          (body.items || []).forEach(function (d) {
+            if (d.knowledge_type) types[d.knowledge_type] = true;
+            var tr = document.createElement("tr");
+            tr.className = "row";
+            tr.innerHTML = "<td>" + esc(d.title) + "</td><td>" + esc(d.knowledge_type || "") +
+              "</td><td>" + esc((d.valid_until || "—").slice(0, 10)) +
+              '</td><td><span class="state-badge ' + esc(d.valid_state) + '">' +
+              esc(STATE_NAMES[d.valid_state] || d.valid_state) + "</span></td>";
+            tr.addEventListener("click", function () {
+              api("/api/knowledge/docs/" + d.id).then(function (full) {
+                $("doc-full").textContent = full.text || "";
+              });
+            });
+            rows.appendChild(tr);
+          });
+          var sel = $("d-type");
+          if (sel.options.length <= 1) {
+            Object.keys(types).sort().forEach(function (t) {
+              var o = document.createElement("option");
+              o.value = t; o.textContent = t;
+              sel.appendChild(o);
+            });
+          }
+          var pages = Math.max(1, Math.ceil(dTotal / D_SIZE));
+          $("d-pageinfo").textContent = "第 " + dPage + " / " + pages + " 页 · 共 " + dTotal + " 篇";
+          $("d-prev").disabled = dPage <= 1;
+          $("d-next").disabled = dPage >= pages;
+        });
+      }
+      $("d-search").addEventListener("click", function () { dPage = 1; loadDocs(); });
+      $("d-q").addEventListener("keydown", function (e) { if (e.key === "Enter") { dPage = 1; loadDocs(); } });
+      $("d-prev").addEventListener("click", function () { dPage--; loadDocs(); });
+      $("d-next").addEventListener("click", function () { dPage++; loadDocs(); });
+
+      // ---------- 缺口看板 ----------
+      function loadGaps() {
+        api("/api/knowledge/gaps/stats").then(function (s) {
+          $("g-days").textContent = s.window_days;
+          $("g-total").textContent = s.total_queries;
+          $("g-nohit").textContent = s.no_hit_count;
+          $("g-ratio").textContent = (s.no_hit_ratio * 100).toFixed(1) + "%";
+        });
+        api("/api/knowledge/gaps").then(function (body) {
+          var rows = $("g-rows");
+          rows.innerHTML = "";
+          if (!body.items.length) {
+            rows.innerHTML = '<tr><td colspan="4" class="muted">窗口期内没有未命中查询，知识库很健康。</td></tr>';
+            return;
+          }
+          body.items.forEach(function (g) {
+            var tr = document.createElement("tr");
+            tr.innerHTML = "<td>" + esc(g.query) + "</td><td>" + g.count + "</td><td>" +
+              esc((g.last_seen || "").slice(0, 19)) + "</td>";
+            var td = document.createElement("td");
+            var btn = document.createElement("button");
+            btn.className = "btn";
+            btn.textContent = "补录";
+            btn.addEventListener("click", function () {
+              document.querySelector('.tabs button[data-tab="drafts"]').click();
+              $("n-q").value = g.query;
+              $("n-a").focus();
+            });
+            td.appendChild(btn);
+            tr.appendChild(td);
+            rows.appendChild(tr);
+          });
+        });
+      }
+
+      // ---------- 补录草稿 ----------
+      function loadDrafts() {
+        api("/api/knowledge/drafts?limit=200").then(function (body) {
+          var groups = { pending_review: [], approved: [], published: [], rejected: [] };
+          (body.items || []).forEach(function (d) { (groups[d.status] || []).push(d); });
+          var box = $("draft-groups");
+          box.innerHTML = "";
+          Object.keys(groups).forEach(function (st) {
+            if (!groups[st].length) return;
+            var g = document.createElement("div");
+            g.className = "draft-group";
+            g.innerHTML = "<h3>" + DRAFT_STATUS[st] + ' <span class="count-badge">' + groups[st].length + "</span></h3>";
+            groups[st].forEach(function (d) {
+              var item = document.createElement("div");
+              item.className = "draft-item";
+              var html = '<div class="q">' + esc(d.question) + "</div>" +
+                '<div class="a">' + esc(d.suggested_answer) + "</div>" +
+                '<div class="m">' + esc(d.created_by) + " " + esc((d.created_at || "").slice(0, 19)) +
+                (d.bundle_asset_id ? " · " + esc(d.bundle_asset_id) : "") +
+                (d.published_docs != null ? " · 发布后 docs=" + d.published_docs : "") +
+                (d.reindex_error ? ' · <span class="error-text">索引重建失败：' + esc(d.reindex_error.slice(0, 120)) + "</span>" : "") +
+                (d.reject_reason ? ' · <span class="error-text">打回：' + esc(d.reject_reason) + "</span>" : "") +
+                "</div>";
+              item.innerHTML = html;
+              if (st === "pending_review" && ["reviewer", "admin"].indexOf(role) >= 0 && d.created_by !== localStorage.getItem("pvg_admin_username")) {
+                var ops = document.createElement("div");
+                ops.style.marginTop = "8px";
+                var pub = document.createElement("button");
+                pub.className = "btn primary";
+                pub.textContent = "发布并重建索引（约 2 分钟）";
+                pub.addEventListener("click", function () {
+                  pub.disabled = true;
+                  pub.textContent = "发布中：写 bundle → 重建索引，请稍等…";
+                  post("/api/knowledge/drafts/" + d.id + "/approve").then(function (r) {
+                    alert(r.status === "published"
+                      ? "已发布，索引 docs=" + r.published_docs
+                      : "索引重建失败，草稿保持已审状态：" + (r.reindex_error || ""));
+                    loadDrafts();
+                  }).catch(function (err) {
+                    pub.disabled = false;
+                    pub.textContent = "发布并重建索引（约 2 分钟）";
+                    alert("发布失败：" + err.message);
+                  });
+                });
+                var rej = document.createElement("button");
+                rej.className = "btn";
+                rej.style.marginLeft = "8px";
+                rej.textContent = "打回";
+                rej.addEventListener("click", function () {
+                  var reason = prompt("打回理由：");
+                  if (reason == null) return;
+                  post("/api/knowledge/drafts/" + d.id + "/reject", { reason: reason }).then(loadDrafts)
+                    .catch(function (err) { alert("打回失败：" + err.message); });
+                });
+                ops.appendChild(pub);
+                ops.appendChild(rej);
+                item.appendChild(ops);
+              }
+              g.appendChild(item);
+            });
+            box.appendChild(g);
+          });
+          if (!box.children.length) box.innerHTML = '<div class="muted">暂无草稿。</div>';
+        });
+      }
+
+      $("n-submit").addEventListener("click", function () {
+        var q = $("n-q").value.trim(), a = $("n-a").value.trim();
+        if (!q || !a) { $("n-status").innerHTML = '<span class="error-text">问题与建议答案必填。</span>'; return; }
+        post("/api/knowledge/drafts", {
+          question: q, suggested_answer: a, wrong_answer: $("n-w").value.trim() || null,
+        }).then(function () {
+          $("n-q").value = ""; $("n-a").value = ""; $("n-w").value = "";
+          $("n-status").textContent = "草稿已提交，等待审核发布。";
+          loadDrafts();
+        }).catch(function (err) {
+          $("n-status").innerHTML = '<span class="error-text">' + esc(err.message) + "</span>";
+        });
+      });
+      // operator 才能建草稿
+      if (["operator", "admin"].indexOf(role) < 0) $("draft-new-panel").classList.add("hidden");
+
+      loadDocs();
+    })();
+  </script>
+</body>
+</html>

@@ -1,0 +1,70 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>会话中心 · PVG 智能客服运营后台</title>
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <!-- 登录视图：用户名密码换 token，存 localStorage -->
+  <div id="login-view" class="login-box">
+    <h1>PVG 智能客服 · 会话中心</h1>
+    <form id="login-form">
+      <input id="login-username" placeholder="用户名" autocomplete="username" required />
+      <input id="login-password" type="password" placeholder="密码" autocomplete="current-password" required />
+      <button type="submit">登录</button>
+    </form>
+    <p id="login-error" class="error"></p>
+  </div>
+
+  <!-- 主视图：三栏（会话列表 / 对话 / trace） -->
+  <div id="main-view" class="hidden">
+    <header class="topbar">
+      <span class="brand">会话中心</span>
+      <nav class="topnav">
+        <a href="/app/workbench.html">质检工作台</a>
+        <a href="/app/" class="active">会话中心</a>
+        <a href="/app/knowledge.html">知识库</a>
+        <a href="/app/rag.html">召回测试台</a>
+        <a href="/app/sandbox.html">试聊沙盒</a>
+        <a href="/app/canned-preview.html">话术预览</a>
+      </nav>
+      <span id="who" class="who"></span>
+      <button id="btn-logout" class="link">退出</button>
+    </header>
+    <div class="columns">
+      <!-- 左：会话列表（10s 轮询） -->
+      <aside id="session-panel">
+        <h2>在线会话</h2>
+        <ul id="session-list"></ul>
+      </aside>
+
+      <!-- 中：对话视图（SSE 实时追加） -->
+      <main id="chat-panel">
+        <div id="takeover-bar" class="hidden">
+          <span id="mode-label"></span>
+          <span class="spacer"></span>
+          <button id="btn-takeover">接管</button>
+          <button id="btn-resume" class="hidden">恢复 AI</button>
+        </div>
+        <div id="chat-empty">← 选择左侧会话开始监控</div>
+        <div id="chat"></div>
+        <div id="human-input" class="hidden">
+          <input id="human-text" placeholder="以人工坐席身份发送…" />
+          <button id="btn-send">发送</button>
+        </div>
+      </main>
+
+      <!-- 右：trace 面板 -->
+      <aside id="trace-panel">
+        <h2>Trace 回放</h2>
+        <div id="trace-empty">点击一条 AI 回复查看该轮决策链</div>
+        <div id="trace"></div>
+      </aside>
+    </div>
+  </div>
+
+  <script src="app.js"></script>
+</body>
+</html>
