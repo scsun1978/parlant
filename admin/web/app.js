@@ -95,8 +95,10 @@
   }
 
   function refreshSessions() {
-    api("/api/sessions").then(function (items) {
+    api("/api/sessions?page=" + (state.page || 1) + "&page_size=50").then(function (data) {
+      var items = (data && data.items) || data || [];
       state.sessions = items;
+      state.total = (data && data.total) || items.length;
       renderSessionList();
       // 当前会话的 mode 可能被其他坐席改动，同步刷新接管条
       var cur = items.filter(function (s) { return s.id === state.currentSid; })[0];
@@ -110,6 +112,19 @@
   function renderSessionList() {
     var ul = $("session-list");
     ul.innerHTML = "";
+    var pageInfo = document.createElement("li");
+    pageInfo.className = "page-info";
+    var totalPages = Math.max(1, Math.ceil((state.total || 0) / 50));
+    pageInfo.innerHTML =
+      '<div class="meta">共 ' + esc(String(state.total || 0)) + " 条会话 · 第 " + esc(String(state.page || 1)) + "/" + totalPages + " 页 " +
+      ((state.page || 1) > 1 ? '<a href="#" id="page-prev">上一页</a> ' : "") +
+      ((state.page || 1) < totalPages ? '<a href="#" id="page-next">下一页</a>' : "") +
+      "</div>";
+    ul.appendChild(pageInfo);
+    var prev = pageInfo.querySelector("#page-prev");
+    var next = pageInfo.querySelector("#page-next");
+    if (prev) prev.addEventListener("click", function (e) { e.preventDefault(); state.page = (state.page || 1) - 1; refreshSessions(); });
+    if (next) next.addEventListener("click", function (e) { e.preventDefault(); state.page = (state.page || 1) + 1; refreshSessions(); });
     state.sessions.forEach(function (s) {
       var li = document.createElement("li");
       if (s.id === state.currentSid) li.className = "active";

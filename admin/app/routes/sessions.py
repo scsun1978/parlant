@@ -69,20 +69,30 @@ def _summarize(events: list[dict[str, Any]]) -> dict[str, Any]:
 
 @router.get("")
 def list_sessions(
+    page: int = 1,
+    page_size: int = 50,
     user: SessionUser = Depends(require_roles(*_READ_ROLES)),
     parlant: ParlantClient = Depends(get_parlant),
 ) -> Any:
-    """透传会话列表，附加工单视图字段（mode/最近消息摘要/最近活动/疑似已读不回）。"""
+    """会话列表（分页，新会话在前）：仅当前页附加工单视图字段（最近消息/已读不回）。
+
+    注：逐会话取事件为 N+1 调用，全量会话下必须分页（934+ 实测会挂起）。
+    """
     sessions = parlant.list_sessions() or []
+    sessions.sort(key=lambda s: s.get("creation_utc", ""), reverse=True)
+    total = len(sessions)
+    page = max(1, page)
+    page_size = max(1, min(page_size, 200))
+    window = sessions[(page - 1) * page_size : page * page_size]
     items = []
-    for s in sessions:
+    for s in window:
         try:
             events = parlant.get_events(s["id"], min_offset=0, wait_for_data=0) or []
             summary = _summarize(events)
         except UpstreamError:
             summary = {"last_message": None, "last_activity_utc": None, "unanswered": False}
         items.append({**s, **summary})
-    return items
+    return {"total": total, "page": page, "page_size": page_size, "items": items}
 
 
 @router.get("/{sid}/events")

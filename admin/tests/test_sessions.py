@@ -19,7 +19,9 @@ async def test_list_sessions_enriched_supervisor(env: Env) -> None:
     sup = await env.login("sup")
     resp = await env.client.get("/api/sessions", headers=sup)
     assert resp.status_code == 200
-    items = resp.json()
+    body = resp.json()
+    assert body["total"] == 3
+    items = body["items"]
     assert len(items) == 3  # s1(auto)/s2(manual)/s3(error)
     s = [x for x in items if x["id"] == "s1"][0]
     assert s["id"] == "s1"
@@ -124,9 +126,10 @@ async def test_human_message_carries_display_name_and_audited(env: Env) -> None:
     assert total == 1
     assert items[0]["actor"] == "sup"
     # 代发后末条为 human_agent 消息 → 不再判定已读不回
-    listing = (await env.client.get("/api/sessions", headers=sup)).json()
-    assert listing[0]["unanswered"] is False
-    assert listing[0]["last_message"]["source"] == "human_agent"
+    listing = (await env.client.get("/api/sessions", headers=sup)).json()["items"]
+    s1_view = [x for x in listing if x["id"] == "s1"][0]
+    assert s1_view["unanswered"] is False
+    assert s1_view["last_message"]["source"] == "human_agent"
 
 
 async def test_human_message_operator_forbidden(env: Env) -> None:
