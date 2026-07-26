@@ -39,7 +39,8 @@ services:
       - ../hf-cache:/root/.cache/huggingface
     ports:
       - "8901:8901"
-    mem_limit: 6g
+    # 峰值=服务模型(~2g)+重建子进程模型加载尖峰(实测 6.7g)，须 ≥9g
+    mem_limit: 9g
     restart: unless-stopped
     networks: [pvg]
     healthcheck:

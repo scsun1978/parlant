@@ -27,7 +27,7 @@ services:
   parlant-server:
     build:
       context: ..
-      dockerfile: deploy/Dockerfile
+      dockerfile: deploy/Dockerfile.patched
     image: pvg-poc:latest
     container_name: parlant-server
     command: python -m parlant.bin.server run --deepseek

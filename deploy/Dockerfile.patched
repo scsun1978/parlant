@@ -1,0 +1,9 @@
+# 补丁层镜像：在已有 pvg-poc 镜像上覆盖两个修复文件，避开 pip 全量重建
+# （办公室网络大文件下载频繁断流 BrokenPipe，见 README 运维注意）
+FROM pvg-poc:latest
+
+# 可靠性补丁（提交 b6ab7ef）：
+# 1) DeepSeek schema 纠错重试 + DEEPSEEK_MODEL 可配（deepseek-chat 下线 → v4-flash）
+# 2) 引擎失败兜底话术（消除已读不回）
+COPY src/parlant/adapters/nlp/deepseek_service.py /usr/local/lib/python3.12/site-packages/parlant/adapters/nlp/deepseek_service.py
+COPY src/parlant/core/engines/alpha/engine.py /usr/local/lib/python3.12/site-packages/parlant/core/engines/alpha/engine.py
