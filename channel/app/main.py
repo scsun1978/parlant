@@ -52,6 +52,13 @@ def create_app(
         }
 
     app.include_router(messages.router)
+
+    # 内容审核前置层（ADR-0005）：规则种子 + 治理路由
+    from channel.app import moderation as mod
+    from channel.app.routes import moderation as moderation_routes
+
+    mod.seed_rules(store)
+    app.include_router(moderation_routes.router)
     return app
 
 

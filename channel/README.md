@@ -87,3 +87,14 @@ channel/
 5. 工具事件 30s 独立超时预算；多渠道（APP/网页）扩展
 6. 多副本粘性路由 + Redis pub/sub 事件转发
 7. 灰度切流开关（openid 哈希 5%→30%→100%，方案 §5.3，W4）
+
+## 内容审核前置层（W2，ADR-0005）
+
+管线：频控（20 条/分/用户，滑动窗口）→ 注入模式库（角色覆盖/指令忽略/提示窃取/越权诱导/红线诱导 5 类种子）→ 不当内容词表。命中即拦截（不转发引擎），返回 `{"blocked": true, "reply", "rule_category"}` 并写 `moderation_events`（不存原文，text_hash 前 16 位）。
+
+- 规则治理（staff，header `X-Admin-Token`，env `CHANNEL_ADMIN_TOKEN`）：
+  `GET/POST /channel/moderation/rules`、`PATCH /channel/moderation/rules/{id}`（enabled 切换，hit_count 自动累计）
+- 审计查询：`GET /channel/moderation/events?limit=`
+- 拦截话术：`CHANNEL_MODERATION_BLOCK_TEXT` 可配
+- 兜底文案治理：`GET/PUT /channel/moderation/fallback-text`（channel_fallback 单文档，版本自增；读取缓存 60s，集合空回退 `CHANNEL_FALLBACK_TEXT`）
+- 验收口径（ADR-0005）：注入种子 5 类正反例测试覆盖；LLM 后置抽检、词表运营扩充、多副本频控 Redis、规则审批流整合为后续项

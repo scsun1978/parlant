@@ -27,6 +27,9 @@ class Settings:
     wechat_timeout_s: float = 10.0
     token_ttl_s: int = 7200  # 渠道 token 有效期（过期 401，login 重发）
     fallback_text: str = "抱歉，系统繁忙，请稍后再试；如需帮助请拨打 021-96990。"
+    moderation_block_text: str = (
+        "抱歉，您的提问方式我无法处理，请换个问题咨询机场出行相关服务。"
+    )  # 审核拦截话术（CHANNEL_MODERATION_BLOCK_TEXT）
 
     @property
     def wechat_enabled(self) -> bool:
@@ -60,5 +63,9 @@ def load_settings() -> Settings:
         token_ttl_s=int(os.environ.get("CHANNEL_TOKEN_TTL_S", "7200")),
         fallback_text=os.environ.get(
             "CHANNEL_FALLBACK_TEXT", "抱歉，系统繁忙，请稍后再试；如需帮助请拨打 021-96990。"
+        ),
+        moderation_block_text=os.environ.get(
+            "CHANNEL_MODERATION_BLOCK_TEXT",
+            "抱歉，您的提问方式我无法处理，请换个问题咨询机场出行相关服务。",
         ),
     )

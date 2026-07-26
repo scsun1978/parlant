@@ -121,6 +121,8 @@ services:
       PARLANT_BASE_URL: http://parlant-server:8800
       CHANNEL_PREAMBLE_TIMEOUT_S: "8"
       CHANNEL_DONE_TIMEOUT_S: "45"
+      # staff 令牌（审核规则/兜底文案治理端点保护）；仅开发环境，生产走 secret
+      CHANNEL_ADMIN_TOKEN: pvg-staff-2026
     ports:
       - "9100:9100"
     mem_limit: 1g

@@ -24,6 +24,8 @@ from channel.app.deps import get_parlant, get_settings, get_store, get_user_id
 from channel.app.translate import to_history, translate_events
 from channel.app.wechat import WechatError
 
+from channel.app import fallback_text as fbtext
+
 router = APIRouter(prefix="/channel", tags=["channel"])
 
 MESSAGES = "channel_messages"  # 幂等缓存集合
@@ -156,7 +158,20 @@ def post_message(
         if age <= settings.idempotency_window_s:
             return {**cached["response"], "status": "duplicate"}
 
+    # 内容审核前置层（ADR-0005）：频控/注入/不当内容，命中即拦截不转发引擎
+    from channel.app.moderation import check_message
+
     sid = _get_or_create_session(store, parlant, user_id, settings.agent_id)
+    verdict = check_message(store, user_id, sid, body.text)
+    if verdict.blocked:
+        return {
+            "session_id": sid,
+            "blocked": True,
+            "reply": settings.moderation_block_text,
+            "rule_category": verdict.category,
+            "status": "blocked",
+        }
+
     baseline_events = parlant.get_events(sid, min_offset=0, wait_for_data=0) or []
     baseline = max((e.get("offset", -1) for e in baseline_events), default=-1) + 1
     parlant.post_event(sid, {"kind": "message", "source": "customer", "message": body.text})
@@ -227,6 +242,7 @@ async def message_stream(
 
     offset = 0
     deadline = time.monotonic() + settings.done_timeout_s
+    fallback_msg = fbtext.get_fallback_text(store, settings.fallback_text)
     completed = False
     fallback_sent = False
     try:
@@ -240,14 +256,14 @@ async def message_stream(
                     events = []
                 else:
                     if not fallback_sent:
-                        _record_fallback(store, session_id, "upstream_down", settings.fallback_text)
-                        await websocket.send_json({"type": "fallback", "text": settings.fallback_text})
+                        _record_fallback(store, session_id, "upstream_down", fallback_msg)
+                        await websocket.send_json({"type": "fallback", "text": fallback_msg})
                     return
-            translated = translate_events(events or [], settings.fallback_text)
+            translated = translate_events(events or [], fallback_msg)
             for msg in translated:
                 offset = max(offset, (msg.get("offset") or offset - 1) + 1)
                 if msg["type"] == "fallback":
-                    _record_fallback(store, session_id, "engine_error", settings.fallback_text)
+                    _record_fallback(store, session_id, "engine_error", fallback_msg)
                     fallback_sent = True
                 if msg["type"] == "message_done":
                     completed = True
@@ -256,8 +272,8 @@ async def message_stream(
             if completed:
                 return  # 本轮答复完成，推送结束（前端可关或保持重连拉 history）
             if not fallback_sent and time.monotonic() > deadline:
-                _record_fallback(store, session_id, "timeout", settings.fallback_text)
-                await websocket.send_json({"type": "fallback", "text": settings.fallback_text})
+                _record_fallback(store, session_id, "timeout", fallback_msg)
+                await websocket.send_json({"type": "fallback", "text": fallback_msg})
                 fallback_sent = True
             if not events:
                 await asyncio.sleep(0.2)  # 空轮询间隔，防紧循环
@@ -277,7 +293,7 @@ def poll_messages(
     """增量事件拉取（WS 降级）：同 WS 转译格式 + next_offset + done。"""
     _owned_session(store, user_id, session_id)
     events = parlant.get_events(session_id, min_offset=0, wait_for_data=0) or []
-    translated = translate_events(events, settings.fallback_text)
+    translated = translate_events(events, fbtext.get_fallback_text(store, settings.fallback_text))
     fresh = [m for m in translated if (m.get("offset") or 0) >= after_offset]
     next_offset = max(((m.get("offset") or 0) + 1 for m in translated), default=after_offset)
     done = any(m["type"] == "message_done" for m in translated)
@@ -298,4 +314,4 @@ def get_history(
     """本会话历史（断线恢复/重进续聊）：用户友好形态，tool/status 不直接暴露。"""
     _owned_session(store, user_id, session_id)
     events = parlant.get_events(session_id, min_offset=0, wait_for_data=0) or []
-    return {"items": to_history(events, limit, settings.fallback_text)}
+    return {"items": to_history(events, limit, fbtext.get_fallback_text(store, settings.fallback_text))}
