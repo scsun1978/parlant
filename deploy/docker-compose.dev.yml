@@ -108,6 +108,34 @@ services:
       retries: 5
       start_period: 30s
 
+  # 渠道 BFF（旅客侧，迭代 3-W1；FastAPI 先行，Spring WebFlux 为生产目标形态——channel/README 登记偏离）
+  channel-bff:
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile.channel
+    image: pvg-channel-bff:latest
+    container_name: pvg-channel-bff
+    environment:
+      MONGO_URL: mongodb://mongo:27017
+      MONGO_DB: pvg_channel
+      PARLANT_BASE_URL: http://parlant-server:8800
+      CHANNEL_PREAMBLE_TIMEOUT_S: "8"
+      CHANNEL_DONE_TIMEOUT_S: "45"
+    ports:
+      - "9100:9100"
+    mem_limit: 1g
+    restart: unless-stopped
+    depends_on:
+      - parlant-server
+      - mongo
+    networks: [pvg]
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request,sys;sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:9100/health',timeout=5).status==200 else 1)"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 30s
+
   # 低代码 CRUD 页面平台（设计 v2.1 Q7：Appsmith 社区版自托管）
   appsmith:
     image: appsmith/appsmith-ce:release

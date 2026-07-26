@@ -1,0 +1,18 @@
+# 渠道 BFF 镜像：基于 pvg-poc（含 fastapi/uvicorn/httpx），补 pymongo，打包 admin/（store 抽象复用）与 channel/
+# 构建（仓库根为上下文）：docker compose -f deploy/docker-compose.yml -f deploy/docker-compose.dev.yml build channel-bff
+FROM pvg-poc:latest
+
+ENV PIP_DEFAULT_TIMEOUT=120 \
+    PIP_RETRIES=10 \
+    PIP_INDEX_URL=https://pypi.tuna.tsinghua.edu.cn/simple \
+    PIP_EXTRA_INDEX_URL=https://pypi.org/simple
+
+RUN pip install "pymongo>=4.11.1"
+
+WORKDIR /app
+COPY admin ./admin
+COPY channel ./channel
+
+ENV PYTHONUNBUFFERED=1
+EXPOSE 9100
+CMD ["python", "-m", "uvicorn", "channel.app.main:app", "--host", "0.0.0.0", "--port", "9100"]
