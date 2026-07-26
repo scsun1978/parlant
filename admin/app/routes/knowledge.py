@@ -231,6 +231,48 @@ def approve_draft(
     return updated  # type: ignore[return-value]
 
 
+@router.post("/drafts/{draft_id}/retry-publish")
+def retry_publish_draft(
+    draft_id: str,
+    user: SessionUser = Depends(require_roles(*_REVIEW_ROLES)),
+    store: Store = Depends(get_store),
+    rag: RagClient = Depends(get_rag),
+) -> dict[str, Any]:
+    """approved 状态（reindex 失败）草稿的自助重发：只重跑索引重建，不重写 bundle。"""
+    doc = _get_draft(store, draft_id)
+    if doc["status"] != "approved":
+        raise HTTPException(
+            status_code=409,
+            detail=f"仅 approved（reindex 失败）状态可重试发布，当前为 {doc['status']}",
+        )
+
+    try:
+        result = rag.reindex(timeout_s=REINDEX_TIMEOUT_S)
+        patch: dict[str, Any] = {
+            "status": "published",
+            "published_docs": result.get("docs") if isinstance(result, dict) else None,
+            "reindex_error": None,
+        }
+    except UpstreamError as exc:
+        patch = {"status": "approved", "reindex_error": str(exc)[:500]}
+
+    updated = store.update(COLLECTION, draft_id, patch)
+    audit.record(
+        store,
+        actor=user.username,
+        role=user.role,
+        action="knowledge.retry_publish",
+        target=draft_id,
+        before={"status": "approved"},
+        after={
+            "status": patch["status"],
+            "published_docs": patch.get("published_docs"),
+            "reindex_error": patch.get("reindex_error"),
+        },
+    )
+    return updated  # type: ignore[return-value]
+
+
 class RejectRequest(BaseModel):
     """驳回请求：必须附理由。"""
 

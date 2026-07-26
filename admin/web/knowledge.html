@@ -279,6 +279,29 @@
                 (d.reject_reason ? ' · <span class="error-text">打回：' + esc(d.reject_reason) + "</span>" : "") +
                 "</div>";
               item.innerHTML = html;
+              if (st === "approved" && ["reviewer", "admin"].indexOf(role) >= 0) {
+                var rbox = document.createElement("div");
+                rbox.style.marginTop = "8px";
+                var retry = document.createElement("button");
+                retry.className = "btn primary";
+                retry.textContent = "重试发布（只重建索引）";
+                retry.addEventListener("click", function () {
+                  retry.disabled = true;
+                  retry.textContent = "重建索引中，请稍等…";
+                  post("/api/knowledge/drafts/" + d.id + "/retry-publish").then(function (r) {
+                    alert(r.status === "published"
+                      ? "已发布，索引 docs=" + r.published_docs
+                      : "仍失败，保持已审状态：" + (r.reindex_error || ""));
+                    loadDrafts();
+                  }).catch(function (err) {
+                    retry.disabled = false;
+                    retry.textContent = "重试发布（只重建索引）";
+                    alert("重试失败：" + err.message);
+                  });
+                });
+                rbox.appendChild(retry);
+                item.appendChild(rbox);
+              }
               if (st === "pending_review" && ["reviewer", "admin"].indexOf(role) >= 0 && d.created_by !== localStorage.getItem("pvg_admin_username")) {
                 var ops = document.createElement("div");
                 ops.style.marginTop = "8px";

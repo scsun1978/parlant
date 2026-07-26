@@ -136,6 +136,27 @@ class DeepSeekSchematicGenerator(BaseSchematicGenerator[T]):
             k: v for k, v in hints.items() if k in self.supported_deepseek_params
         }
 
+        # PVG 补丁：schema 输出失败（非法 JSON / 不合 schema）时用纠错 prompt 重试一次，
+        # 消除引擎整轮失败导致的"已读不回"（实测约 19% 轮次）。API/网络错误不重试。
+        try:
+            return await self._generate_once(prompt, deepseek_api_arguments)
+        except (json.JSONDecodeError, ValidationError, ValueError) as exc:
+            self.logger.warning(
+                f"Generation output invalid ({type(exc).__name__}); retrying with corrective prompt"
+            )
+            corrective_prompt = (
+                f"{prompt}\n\n"
+                "【修正要求】你上一次的输出不是符合要求的 JSON。"
+                "请严格只输出一个符合所要求 JSON Schema 的 JSON 对象，"
+                "不要包含 markdown 代码块标记或任何额外文字。"
+            )
+            return await self._generate_once(corrective_prompt, deepseek_api_arguments)
+
+    async def _generate_once(
+        self,
+        prompt: str,
+        deepseek_api_arguments: Mapping[str, Any],
+    ) -> SchematicGenerationResult[T]:
         t_start = time.time()
         response = await self._client.chat.completions.create(
             messages=[{"role": "user", "content": prompt}],
@@ -204,7 +225,12 @@ class DeepSeekSchematicGenerator(BaseSchematicGenerator[T]):
 
 class DeepSeek_Chat(DeepSeekSchematicGenerator[T]):
     def __init__(self, logger: Logger, tracer: Tracer, meter: Meter, health_reporter: HealthReporter) -> None:
-        super().__init__(model_name="deepseek-chat", logger=logger, tracer=tracer, meter=meter, health_reporter=health_reporter)
+        # PVG 补丁：模型名环境变量可配置（deepseek-chat 已于 2026-07 被 API 下线，
+        # 现仅支持 deepseek-v4-pro / deepseek-v4-flash）
+        super().__init__(
+            model_name=os.environ.get("DEEPSEEK_MODEL", "deepseek-v4-flash"),
+            logger=logger, tracer=tracer, meter=meter, health_reporter=health_reporter,
+        )
 
     @property
     @override

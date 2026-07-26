@@ -15,6 +15,7 @@
 from __future__ import annotations
 import asyncio
 import copy
+import os
 from collections import OrderedDict, defaultdict
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -217,6 +218,9 @@ class AlphaEngine(Engine):
 
             if await self._hooks.call_on_error(loaded_context, exc):
                 await self._emit_error_event(loaded_context, formatted_exception)
+
+            # PVG 补丁：引擎失败时给旅客发兜底话术，消除"已读不回"
+            await self._emit_fallback_message(loaded_context, exc)
 
             self._report_turn_health(start.elapsed, success=False, error=exc)
             return False
@@ -942,6 +946,30 @@ class AlphaEngine(Engine):
                 "data": {"exception": exception_details},
             },
         )
+
+    # PVG 补丁：引擎整轮失败时的兜底话术（可用环境变量覆盖文案）
+    _PVG_FALLBACK_MESSAGE = os.environ.get(
+        "PVG_FALLBACK_MESSAGE",
+        "抱歉，我暂时没能处理好您的问题。您可以换个方式再问我一次；"
+        "如需人工帮助，请拨打浦东机场服务热线 021-96990。",
+    )
+
+    async def _emit_fallback_message(self, context: EngineContext, exc: Exception) -> None:
+        """引擎失败时给旅客发一条安全的兜底消息（metadata 标记 fallback 供运营统计）。"""
+        try:
+            await context.session_event_emitter.emit_message_event(
+                trace_id=self._tracer.trace_id,
+                data={
+                    "message": self._PVG_FALLBACK_MESSAGE,
+                    "participant": {"id": "pvg-fallback", "display_name": "浦东机场智能客服"},
+                },
+                metadata={
+                    "fallback": True,
+                    "reason": type(exc).__name__,
+                },
+            )
+        except Exception as fallback_exc:  # 兜底发送失败不得掩盖原始错误
+            self._logger.error(f"Fallback message emission failed: {fallback_exc}")
 
     async def _emit_acknowledgement_event(self, context: EngineContext) -> None:
         await context.session_event_emitter.emit_status_event(

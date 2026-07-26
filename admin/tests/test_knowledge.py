@@ -193,3 +193,46 @@ async def test_published_draft_linkable_in_bad_case(env: Env) -> None:
     assert resp.status_code == 200
     assert resp.json()["fix_ref"] == {"type": "knowledge_draft", "id": draft["id"]}
     assert resp.json()["status"] == "pending_verify"
+
+
+async def test_retry_publish_success_and_guard(env: Env) -> None:
+    """approved(reindex 失败) → retry-publish 成功翻 published；非 approved 状态 409。"""
+    op = await env.login("op")
+    draft = await _create_draft(env, op)
+    env.rag.reindex_fails = True
+    reviewer = await env.login("rev")
+    resp = await env.client.post(
+        f"/api/knowledge/drafts/{draft['id']}/approve", headers=reviewer
+    )
+    assert resp.status_code == 200
+    assert resp.json()["status"] == "approved"
+
+    # pending_review 状态的另一草稿直接 retry → 409
+    draft2 = await _create_draft(env, op)
+    resp = await env.client.post(
+        f"/api/knowledge/drafts/{draft2['id']}/retry-publish", headers=reviewer
+    )
+    assert resp.status_code == 409
+
+    env.rag.reindex_fails = False
+    resp = await env.client.post(
+        f"/api/knowledge/drafts/{draft['id']}/retry-publish", headers=reviewer
+    )
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["status"] == "published"
+    assert resp.json()["reindex_error"] is None
+
+
+async def test_retry_publish_reindex_still_failing(env: Env) -> None:
+    """retry-publish 仍失败：保持 approved 且更新错误尾。"""
+    op = await env.login("op")
+    draft = await _create_draft(env, op)
+    env.rag.reindex_fails = True
+    reviewer = await env.login("rev")
+    await env.client.post(f"/api/knowledge/drafts/{draft['id']}/approve", headers=reviewer)
+    resp = await env.client.post(
+        f"/api/knowledge/drafts/{draft['id']}/retry-publish", headers=reviewer
+    )
+    assert resp.status_code == 200
+    assert resp.json()["status"] == "approved"
+    assert resp.json()["reindex_error"]
