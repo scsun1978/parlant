@@ -29,14 +29,29 @@ channel/
 | `CHANNEL_PREAMBLE_TIMEOUT_S` | `8` | 同步等 preamble 上限（对齐引擎实测 4.5s） |
 | `CHANNEL_DONE_TIMEOUT_S` | `45` | ready/completed 上限（答复 15–40s 预算） |
 | `CHANNEL_AGENT_ID` | `xyVHBNLLPg` | 生产 agent |
+| `WECHAT_APP_ID` / `WECHAT_APP_SECRET` | 空 | **都配置才启用微信模式，否则匿名模式**（双模判定 `settings.wechat_enabled`） |
+| `WECHAT_API_BASE_URL` | `https://api.weixin.qq.com` | 微信 API 地址（预发/代理可换） |
+| `WECHAT_GRANT_TYPE` | `authorization_code` | code2session grant_type |
+| `WECHAT_TIMEOUT_S` | `10` | 微信 API 超时 |
+| `CHANNEL_TOKEN_TTL_S` | `7200` | 渠道 token 有效期（过期 401 `token 已过期，请重新登录`，login 一律重发新 token） |
+| `CHANNEL_FALLBACK_TEXT` | 抱歉，系统繁忙，请稍后再试；如需帮助请拨打 021-96990。 | 兜底话术（W2 配置化；接管理后台审批版本为后续项，见遗留） |
 
-启动：`uvicorn channel.app.main:app --port 9100`；测试：`.venv/bin/python -m pytest channel/tests -q`（16 用例）。
+启动：`uvicorn channel.app.main:app --port 9100`；测试：`.venv/bin/python -m pytest channel/tests -q`（27 用例）。
+
+## 双模说明（W2）
+
+- **匿名模式**（默认）：`POST /channel/login {device_id}`，用户键 `sha256(device_id)`，单设备续聊
+- **微信模式**（配齐 appid/secret）：`POST /channel/wechat/login {code}` → `code2session` 换 openid/unionid → 用户键 `sha256("wechat:" + unionid||openid)`（unionid 优先，同一旅客**跨设备续聊**）；session_key **不落库**（登记遗留：后续用于解密小程序用户信息）
+- `GET /channel/config`（公开，无需 token）：`{mode: "anonymous"|"wechat", preamble_timeout_s, done_timeout_s, features: {ws: true, poll: true, fallback: true}}`——**绝不输出 secret**（有测试守护）
+- 微信 API 失败（网络/非 200/errcode≠0）→ 502 带微信错误码摘要（不含 secret）；匿名模式调 `/channel/wechat/login` → **501** `{detail: "微信登录未配置，请使用 /channel/login 匿名模式"}`
+
+**微信接入前置条件**（生产）：appid/secret 来自小程序管理后台（secret 仅服务端持有，绝不进小程序包）；BFF 域名需配置进小程序 `request`/`socket` 合法域名且生产必须 HTTPS；预发可用 `WECHAT_API_BASE_URL` 指向代理。
 
 ## 接口契约（与方案 §3.1 对齐）
 
 | 方案 §3.1 | 本实现 | 对齐说明 |
 |---|---|---|
-| `POST /channel/wechat/login` `{code}` → `{channelToken, openid 摘要, resumeSessionId?}` | `POST /channel/login` `{device_id}` → `{channelToken, user_id, resume_session_id?}` | **W1 匿名续聊**（方案 §9 已决）：openid 维度的 device_id 只存 sha256；微信 code2session 换 openid 为 W2+ 接入点，契约字段不变 |
+| `POST /channel/wechat/login` `{code}` → `{channelToken, openid 摘要, resumeSessionId?}` | `POST /channel/wechat/login` `{code}` → `{channelToken, user_id, resume_session_id?}`（微信模式）；`POST /channel/login` `{device_id}`（匿名模式，不受配置影响恒可用） | **W2 已接 code2session**：unionid 优先做用户键（跨设备续聊）；session_key 不落库；未配置时 501 可操作提示 |
 | `POST /channel/messages` `{text}` → `{sessionId, preamble{text, displayAs:"placeholder"}}` | `POST /channel/messages` `{text, client_msg_id}` → `{session_id, preamble{text, display_as}, ws_url, status}` | 同步只覆盖 preamble（≤8s，超时 preamble 为空不阻塞）；**幂等** `client_msg_id+user_id` 5 分钟窗口去重，重发返回首次缓存 `status:"duplicate"`（方案 §6） |
 | `WS /channel/messages/stream`：`tool_start` / `message_append` / `message_done` / `fallback` / `handoff_offered` | `WS /channel/messages/stream?token=&session_id=`：前四类已实现；`handoff_offered` 属 W3 转人工 | tool→`tool_start("正在为您查询…")`；ai message→`message_append`（preamble 启发式 `display_as`）；ready+stage=completed→`message_done`；引擎 error / 45s 无完成 / 上游断 → `fallback`（兜底文案常量，写 `fallback_events`） |
 | WS 不可达降级 `GET /channel/messages/poll?afterOffset=` | `GET /channel/messages/poll?session_id=&after_offset=` → `{events[同 WS 格式], next_offset, done}` | 同转译函数的增量形态 |
@@ -63,11 +78,12 @@ channel/
 - **转人工**：`handoff_offered` 与坐席侧 `/handoff/*` 为 W3 范围，本切片不含
 - **Java 置换**：契约以此 README 表格与 `channel/tests/` 为准；置换后本服务退役
 
-## 遗留（W2+）
+## 遗留（W2 剩余 / W3+）
 
-1. 微信 `code2session` 换 openid（W1 用 device_id 匿名，契约字段已预留）
-2. JWT 渠道 token（2h）置换随机串
-3. 兜底话术接管理后台审批生效版本；内容审核前置（ADR-0005）
+1. ~~微信 `code2session` 换 openid~~ **W2 已实现**；遗留：`session_key` 解密小程序用户信息（手机号/头像，需旅客授权后接入）
+2. ~~JWT 渠道 token~~ 部分实现：token TTL 已生效（`CHANNEL_TOKEN_TTL_S`，过期 401 重登）；签名 JWT（可跨副本校验、免查库）为后续项
+3. 兜底话术接管理后台审批生效版本（W2 已配置化 `CHANNEL_FALLBACK_TEXT`，接 admin-bff 话术中心为后续项）；内容审核前置（ADR-0005）
 4. 转人工工单与坐席桥接（W3）；`handoff_offered` 事件
 5. 工具事件 30s 独立超时预算；多渠道（APP/网页）扩展
 6. 多副本粘性路由 + Redis pub/sub 事件转发
+7. 灰度切流开关（openid 哈希 5%→30%→100%，方案 §5.3，W4）

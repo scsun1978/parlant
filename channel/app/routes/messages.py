@@ -17,10 +17,12 @@ from pydantic import BaseModel
 
 from admin.app.parlant_client import ParlantClient, UpstreamError
 from admin.app.store import Store
+from channel.app import wechat
 from channel.app.auth import SESSIONS, login_user, lookup_user, utc_now_iso
 from channel.app.config import Settings
 from channel.app.deps import get_parlant, get_settings, get_store, get_user_id
-from channel.app.translate import FALLBACK_TEXT, to_history, translate_events
+from channel.app.translate import to_history, translate_events
+from channel.app.wechat import WechatError
 
 router = APIRouter(prefix="/channel", tags=["channel"])
 
@@ -34,6 +36,23 @@ class LoginRequest(BaseModel):
     device_id: str
 
 
+class WechatLoginRequest(BaseModel):
+    """微信登录请求：wx.login 一次性 code。"""
+
+    code: str
+
+
+@router.get("/config")
+def channel_config(settings: Settings = Depends(get_settings)) -> dict[str, Any]:
+    """公开运行时信息（无需 token）：供小程序自适应。**绝不输出 secret**。"""
+    return {
+        "mode": "wechat" if settings.wechat_enabled else "anonymous",
+        "preamble_timeout_s": settings.preamble_timeout_s,
+        "done_timeout_s": settings.done_timeout_s,
+        "features": {"ws": True, "poll": True, "fallback": True},
+    }
+
+
 @router.post("/login")
 def login(
     body: LoginRequest,
@@ -41,7 +60,29 @@ def login(
     store: Store = Depends(get_store),
 ) -> dict[str, Any]:
     """匿名续聊登录：首访建用户，返回 token 与 24h 内最近 open 会话。"""
-    return login_user(store, body.device_id, settings.resume_window_hours)
+    return login_user(store, body.device_id, settings.resume_window_hours, settings.token_ttl_s)
+
+
+@router.post("/wechat/login")
+def wechat_login(
+    body: WechatLoginRequest,
+    settings: Settings = Depends(get_settings),
+    store: Store = Depends(get_store),
+) -> dict[str, Any]:
+    """微信模式登录：code2session 换 openid/unionid → 统一 token 签发与续聊逻辑。
+
+    匿名模式（未配 appid/secret）返回 501 可操作提示；session_key 不落库。
+    """
+    if not settings.wechat_enabled:
+        raise HTTPException(status_code=501, detail="微信登录未配置，请使用 /channel/login 匿名模式")
+    try:
+        session = wechat.code2session(settings, body.code)
+    except WechatError as exc:
+        raise HTTPException(status_code=502, detail=exc.detail) from exc
+    # session_key 不落库（README 登记后续用于解密用户信息）
+    return login_user(
+        store, wechat.user_key_for(session), settings.resume_window_hours, settings.token_ttl_s
+    )
 
 
 def _open_session(store: Store, user_id: str) -> dict[str, Any] | None:
@@ -81,11 +122,11 @@ def _get_or_create_session(store: Store, parlant: ParlantClient, user_id: str, a
     return sid
 
 
-def _record_fallback(store: Store, session_id: str, trigger: str) -> None:
+def _record_fallback(store: Store, session_id: str, trigger: str, text: str) -> None:
     """兜底观测：目标 <2%（方案 §4 fallback_events）。"""
     store.insert(
         FALLBACK_EVENTS,
-        {"session_id": session_id, "trigger": trigger, "text": FALLBACK_TEXT, "ts": utc_now_iso()},
+        {"session_id": session_id, "trigger": trigger, "text": text, "ts": utc_now_iso()},
     )
 
 
@@ -199,14 +240,14 @@ async def message_stream(
                     events = []
                 else:
                     if not fallback_sent:
-                        _record_fallback(store, session_id, "upstream_down")
-                        await websocket.send_json({"type": "fallback", "text": FALLBACK_TEXT})
+                        _record_fallback(store, session_id, "upstream_down", settings.fallback_text)
+                        await websocket.send_json({"type": "fallback", "text": settings.fallback_text})
                     return
-            translated = translate_events(events or [])
+            translated = translate_events(events or [], settings.fallback_text)
             for msg in translated:
                 offset = max(offset, (msg.get("offset") or offset - 1) + 1)
                 if msg["type"] == "fallback":
-                    _record_fallback(store, session_id, "engine_error")
+                    _record_fallback(store, session_id, "engine_error", settings.fallback_text)
                     fallback_sent = True
                 if msg["type"] == "message_done":
                     completed = True
@@ -215,8 +256,8 @@ async def message_stream(
             if completed:
                 return  # 本轮答复完成，推送结束（前端可关或保持重连拉 history）
             if not fallback_sent and time.monotonic() > deadline:
-                _record_fallback(store, session_id, "timeout")
-                await websocket.send_json({"type": "fallback", "text": FALLBACK_TEXT})
+                _record_fallback(store, session_id, "timeout", settings.fallback_text)
+                await websocket.send_json({"type": "fallback", "text": settings.fallback_text})
                 fallback_sent = True
             if not events:
                 await asyncio.sleep(0.2)  # 空轮询间隔，防紧循环
@@ -229,13 +270,14 @@ def poll_messages(
     session_id: str = Query(...),
     after_offset: int = Query(default=0, ge=0),
     user_id: str = Depends(get_user_id),
+    settings: Settings = Depends(get_settings),
     store: Store = Depends(get_store),
     parlant: ParlantClient = Depends(get_parlant),
 ) -> dict[str, Any]:
     """增量事件拉取（WS 降级）：同 WS 转译格式 + next_offset + done。"""
     _owned_session(store, user_id, session_id)
     events = parlant.get_events(session_id, min_offset=0, wait_for_data=0) or []
-    translated = translate_events(events)
+    translated = translate_events(events, settings.fallback_text)
     fresh = [m for m in translated if (m.get("offset") or 0) >= after_offset]
     next_offset = max(((m.get("offset") or 0) + 1 for m in translated), default=after_offset)
     done = any(m["type"] == "message_done" for m in translated)
@@ -249,10 +291,11 @@ def get_history(
     session_id: str = Query(...),
     limit: int = Query(default=50, ge=1, le=200),
     user_id: str = Depends(get_user_id),
+    settings: Settings = Depends(get_settings),
     store: Store = Depends(get_store),
     parlant: ParlantClient = Depends(get_parlant),
 ) -> dict[str, Any]:
     """本会话历史（断线恢复/重进续聊）：用户友好形态，tool/status 不直接暴露。"""
     _owned_session(store, user_id, session_id)
     events = parlant.get_events(session_id, min_offset=0, wait_for_data=0) or []
-    return {"items": to_history(events, limit)}
+    return {"items": to_history(events, limit, settings.fallback_text)}

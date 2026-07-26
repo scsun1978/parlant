@@ -21,7 +21,9 @@ def _flagged_preamble(event: dict[str, Any]) -> bool:
     return data.get("preamble") is True or bool((data.get("metadata") or {}).get("preamble"))
 
 
-def translate_events(events: list[dict[str, Any]]) -> list[dict[str, Any]]:
+def translate_events(
+    events: list[dict[str, Any]], fallback_text: str = FALLBACK_TEXT
+) -> list[dict[str, Any]]:
     """批量转译（WS 与 poll 共用）；每条带 offset 供增量拉取。"""
     out: list[dict[str, Any]] = []
     ai_seen_in_turn = 0
@@ -51,11 +53,13 @@ def translate_events(events: list[dict[str, Any]]) -> list[dict[str, Any]]:
             if data.get("status") == "ready" and inner.get("stage") == "completed":
                 out.append({"type": "message_done", "offset": offset})
             elif data.get("status") == "error":
-                out.append({"type": "fallback", "text": FALLBACK_TEXT, "offset": offset})
+                out.append({"type": "fallback", "text": fallback_text, "offset": offset})
     return out
 
 
-def to_history(events: list[dict[str, Any]], limit: int) -> list[dict[str, Any]]:
+def to_history(
+    events: list[dict[str, Any]], limit: int, fallback_text: str = FALLBACK_TEXT
+) -> list[dict[str, Any]]:
     """用户友好历史形态：[{role: user|assistant|system, text, ts, display_as}]。
 
     tool/status 事件不直接暴露（引擎 error 折成 system 行）。
@@ -92,5 +96,5 @@ def to_history(events: list[dict[str, Any]], limit: int) -> list[dict[str, Any]]
                 }
             )
         elif kind == "status" and (ev.get("data") or {}).get("status") == "error":
-            items.append({"role": "system", "text": FALLBACK_TEXT, "ts": ts, "display_as": "fallback"})
+            items.append({"role": "system", "text": fallback_text, "ts": ts, "display_as": "fallback"})
     return items[-limit:]
